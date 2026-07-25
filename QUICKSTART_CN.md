@@ -21,12 +21,12 @@ python --version
 还是刚才那个终端窗口,输入：
 
 ```bash
-pip install "roleplay-slim[proxy]"
+pip install "roleplay-slim[all]"
 ```
 
-`[proxy]` 这部分会顺带装上把它当独立服务器跑所需要的小组件（大多数人需要这个）。
-如果你只打算在自己的 Python 代码里 `import` 用,不需要独立服务,可以去掉 `[proxy]`,
-直接 `pip install roleplay-slim`。
+`[all]` 一次性把所有东西都装好（独立服务器需要的组件 + 更准的 token 统计),不用你去记
+到底该装哪个 extra 名字——全部加起来也就 5MB 以内。如果你只打算在自己的 Python 代码里
+`import` 用,完全不跑独立服务,可以只装 `pip install roleplay-slim`。
 
 ## 第三步 —— 准备好你真实的 API key
 

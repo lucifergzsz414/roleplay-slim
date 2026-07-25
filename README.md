@@ -128,7 +128,13 @@ Run `pytest` to execute both.
 ```bash
 pip install roleplay-slim              # library only
 pip install "roleplay-slim[proxy]"     # + the HTTP proxy
+pip install "roleplay-slim[all]"       # proxy + accurate tiktoken-based stats, one shot
 ```
+
+`[all]` is just `[proxy,tokens]` — it exists so you don't have to remember the
+extra names to get everything working; the full dependency closure is under
+5 MB (verified — nowhere near the ML-heavy `[proxy]` extras some other tools
+in this space pull in).
 
 ## Use as a library
 

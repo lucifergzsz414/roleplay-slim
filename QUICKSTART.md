@@ -23,13 +23,14 @@ You should see something like `Python 3.12.0`.
 In the same terminal:
 
 ```bash
-pip install "roleplay-slim[proxy]"
+pip install "roleplay-slim[all]"
 ```
 
-The `[proxy]` part also installs the small extra pieces needed to run it as
-a standalone server (most people want this). If you only plan to `import`
-it inside your own Python code, you can drop `[proxy]` and just run
-`pip install roleplay-slim`.
+`[all]` installs everything in one shot (the proxy server pieces, plus
+accurate token-count stats) so you don't need to think about which extra
+name to type — the whole thing is under 5 MB. If you only plan to
+`import` this inside your own Python code and never run the standalone
+proxy, you can drop down to a plain `pip install roleplay-slim` instead.
 
 ## Step 3 — Get your real API key ready
 

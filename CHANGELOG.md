@@ -9,6 +9,11 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 ## [Unreleased]
 
 ### Added
+- `[all]` extra (`pip install "roleplay-slim[all]"`) — a single install command combining
+  `[proxy,tokens]` so new users don't need to know the individual extra names. Verified via
+  `pip download` that the full dependency closure is under 5 MB, versus 11+ MB for Kompact
+  (which bundles a full OpenTelemetry stack) and considerably more for headroom-ai's `[proxy]`
+  extra (onnxruntime, transformers, magika, among others).
 - `CompressorConfig` now validates its fields on construction (`keep_recent_turns`,
   `history_window_mode`, `prefix_override`, `stage_direction_pattern`) and raises
   `ValueError` with a specific, actionable message instead of failing confusingly

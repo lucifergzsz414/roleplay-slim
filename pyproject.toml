@@ -22,6 +22,9 @@ proxy = [
 tokens = [
     "tiktoken>=0.6",
 ]
+all = [
+    "roleplay-slim[proxy,tokens]",
+]
 dev = [
     "pytest>=8.0",
     "hypothesis>=6.100",
