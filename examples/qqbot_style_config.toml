@@ -1,0 +1,34 @@
+# Example roleplay-slim config modeled on a real production roleplay chat
+# bot's message structure — a stable [SYSTEM_PROMPT, SHARED_BLOCK] prefix
+# (~2 system messages) followed by conversation history, memory-retrieval
+# blocks, and a repeated per-request format-reminder footer.
+#
+# No real user data or persona text is included here — only the shape.
+
+[proxy]
+upstream_base_url = "https://api.deepseek.com/v1"
+upstream_api_key_env = "UPSTREAM_API_KEY"
+host = "127.0.0.1"
+port = 8791
+
+[compressor]
+# Keep the last 3 turns (a "turn" = one user message + the reply that
+# answered it) completely verbatim — recent nuance matters most.
+keep_recent_turns = 3
+
+enable_whitespace_normalize = true
+enable_dedupe_verbatim_tail = true
+enable_history_window = true
+enable_strip_stage_directions = true
+
+# "trim" keeps a first+last-sentence stub of older turns instead of
+# dropping them outright. Use "drop" if your app already injects a
+# separate persistent-memory/summary system message (many roleplay bots
+# do — dropping raw history is safe there since the summary already
+# carries the long-term facts).
+history_window_mode = "trim"
+
+# This app wraps action/stage-direction text in full-width parens, e.g.
+# "（轻轻拨弄吉他弦）你好。" — adjust to match your own convention, e.g.
+# r"\*[^*]*\*" for markdown-style *asterisks*.
+stage_direction_pattern = '（[^）]*）'
