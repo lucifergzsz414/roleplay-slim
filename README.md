@@ -99,7 +99,8 @@ from roleplay_slim import compress, CompressorConfig
 config = CompressorConfig(
     keep_recent_turns=3,
     enable_strip_stage_directions=True,
-    stage_direction_pattern=r"（[^）]*）",  # match your app's convention
+    stage_direction_pattern="fullwidth_parens",  # or "asterisk", "halfwidth_parens",
+                                                  # "square_bracket", or your own raw regex
 )
 compressed_messages = compress(messages, config)
 ```

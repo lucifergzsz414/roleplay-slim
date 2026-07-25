@@ -29,6 +29,8 @@ enable_strip_stage_directions = true
 history_window_mode = "trim"
 
 # This app wraps action/stage-direction text in full-width parens, e.g.
-# "（轻轻拨弄吉他弦）你好。" — adjust to match your own convention, e.g.
-# r"\*[^*]*\*" for markdown-style *asterisks*.
-stage_direction_pattern = '（[^）]*）'
+# "（轻轻拨弄吉他弦）你好。". Use a built-in preset name (see
+# STAGE_DIRECTION_PRESETS in roleplay_slim/config.py: "fullwidth_parens",
+# "halfwidth_parens", "asterisk", "square_bracket") or your own raw regex
+# if your app uses a different convention.
+stage_direction_pattern = "fullwidth_parens"

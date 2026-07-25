@@ -6,6 +6,7 @@ field has a safe default so ``CompressorConfig()`` alone is usable.
 """
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,7 +14,22 @@ from pathlib import Path
 if sys.version_info >= (3, 11):
     import tomllib
 else:
-    import tomli as tomllib  # type: ignore[import-not-found]
+    import tomli as tomllib
+
+
+# Named regex presets for stage_direction_pattern, covering the
+# conventions seen across the real apps this project was validated
+# against (a production QQ roleplay bot uses full-width parens; a noir
+# fixture used asterisks) plus a couple of other common ones. Pass either
+# a preset name (looked up here) or your own raw regex string.
+STAGE_DIRECTION_PRESETS: dict[str, str] = {
+    "fullwidth_parens": r"（[^）]*）",  # （挥手）— the xiaomu bot's convention
+    "halfwidth_parens": r"\([^)]*\)",  # (waves)
+    "asterisk": r"\*[^*]*\*",  # *waves*
+    "square_bracket": r"\[[^\]]*\]",  # [waves] — careful: matches format-tag
+    # brackets like [信任:+0] too if you use those; prefer a distinct
+    # convention for stage directions if your app also uses bracket tags.
+}
 
 
 @dataclass
@@ -41,11 +57,11 @@ class CompressorConfig:
     history_window_mode: str = "trim"  # "trim" | "drop"
 
     # Regex describing how this app wraps stage directions / action
-    # descriptions, e.g. r"（[^）]*）" for full-width parens (used by the
-    # xiaomu bot this project was built against) or r"\*[^*]*\*" for
-    # markdown-style *asterisks*. Only consulted when
+    # descriptions. Either a raw regex string (e.g. r"（[^）]*）") or the
+    # name of a STAGE_DIRECTION_PRESETS entry (e.g. "fullwidth_parens"),
+    # resolved in __post_init__. Only consulted when
     # enable_strip_stage_directions is True.
-    stage_direction_pattern: str = r"（[^）]*）"
+    stage_direction_pattern: str = "fullwidth_parens"
 
     # Override the auto-detected prefix length (see segmenter.detect_prefix).
     # None means "auto-detect: all leading system messages before the first
@@ -53,12 +69,34 @@ class CompressorConfig:
     # cache-stable prefix doesn't match that heuristic.
     prefix_override: int | None = None
 
+    def __post_init__(self) -> None:
+        if self.keep_recent_turns < 0:
+            raise ValueError(f"keep_recent_turns must be >= 0, got {self.keep_recent_turns}")
+        if self.history_window_mode not in ("trim", "drop"):
+            raise ValueError(
+                f'history_window_mode must be "trim" or "drop", got {self.history_window_mode!r}'
+            )
+        if self.prefix_override is not None and self.prefix_override < 0:
+            raise ValueError(f"prefix_override must be >= 0 or None, got {self.prefix_override}")
+
+        # Resolve a preset name to its regex; a value that isn't a known
+        # preset name is assumed to already be a raw regex.
+        pattern = STAGE_DIRECTION_PRESETS.get(self.stage_direction_pattern, self.stage_direction_pattern)
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise ValueError(
+                f"stage_direction_pattern is not a valid regex and not a known preset "
+                f"({sorted(STAGE_DIRECTION_PRESETS)}): {self.stage_direction_pattern!r} ({e})"
+            ) from e
+        self.stage_direction_pattern = pattern
+
     @classmethod
     def from_toml(cls, path: str | Path) -> "CompressorConfig":
         with open(path, "rb") as f:
             data = tomllib.load(f)
         section = data.get("compressor", data)
-        known = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+        known = {f.name for f in cls.__dataclass_fields__.values()}
         kwargs = {k: v for k, v in section.items() if k in known}
         return cls(**kwargs)
 
