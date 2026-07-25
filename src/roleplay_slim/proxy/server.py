@@ -18,7 +18,11 @@ from ..config import ProxyConfig
 from ..stats import CompressionStats
 
 
-def create_app(config: ProxyConfig) -> FastAPI:
+def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+    """transport lets tests substitute an httpx.MockTransport for the real
+    network call, so the proxy's own request/response handling (headers,
+    streaming passthrough, compression call-through) can be exercised
+    without hitting a real upstream API."""
     app = FastAPI(title="roleplay-slim proxy")
     stats = CompressionStats()
     api_key = os.environ.get(config.upstream_api_key_env, "")
@@ -47,12 +51,12 @@ def create_app(config: ProxyConfig) -> FastAPI:
         is_streaming = bool(body.get("stream"))
 
         if not is_streaming:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=120.0, transport=transport) as client:
                 resp = await client.post(upstream_url, json=body, headers=headers)
             return JSONResponse(content=resp.json(), status_code=resp.status_code)
 
         async def stream_upstream() -> AsyncIterator[bytes]:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=120.0, transport=transport) as client:
                 async with client.stream("POST", upstream_url, json=body, headers=headers) as resp:
                     async for chunk in resp.aiter_bytes():
                         yield chunk
