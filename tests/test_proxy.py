@@ -34,7 +34,10 @@ def _sample_body(stream: bool = False) -> dict:
 def _make_client(handler) -> TestClient:
     config = ProxyConfig(compressor=CompressorConfig(keep_recent_turns=1))
     app = create_app(config, transport=httpx.MockTransport(handler))
-    return TestClient(app)
+    # __enter__ (not just construction) is what actually runs the app's
+    # lifespan, which is where the shared httpx.AsyncClient gets created —
+    # see server.py's create_app().
+    return TestClient(app).__enter__()
 
 
 def test_healthz():

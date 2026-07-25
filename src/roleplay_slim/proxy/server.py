@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import httpx
@@ -26,9 +27,19 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
     network call, so the proxy's own request/response handling (headers,
     streaming passthrough, compression call-through) can be exercised
     without hitting a real upstream API."""
-    app = FastAPI(title="roleplay-slim proxy")
     stats = CompressionStats()
     api_key = os.environ.get(config.upstream_api_key_env, "")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # One client for the app's lifetime so requests reuse the
+        # underlying connection pool instead of paying a fresh TCP/TLS
+        # handshake every single call.
+        async with httpx.AsyncClient(timeout=120.0, transport=transport) as client:
+            app.state.client = client
+            yield
+
+    app = FastAPI(title="roleplay-slim proxy", lifespan=lifespan)
 
     @app.get("/healthz")
     async def healthz():
@@ -61,17 +72,16 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
 
         upstream_url = f"{config.upstream_base_url.rstrip('/')}/chat/completions"
         is_streaming = bool(body.get("stream"))
+        client: httpx.AsyncClient = request.app.state.client
 
         if not is_streaming:
-            async with httpx.AsyncClient(timeout=120.0, transport=transport) as client:
-                resp = await client.post(upstream_url, json=body, headers=headers)
+            resp = await client.post(upstream_url, json=body, headers=headers)
             return JSONResponse(content=resp.json(), status_code=resp.status_code)
 
         async def stream_upstream() -> AsyncIterator[bytes]:
-            async with httpx.AsyncClient(timeout=120.0, transport=transport) as client:
-                async with client.stream("POST", upstream_url, json=body, headers=headers) as resp:
-                    async for chunk in resp.aiter_bytes():
-                        yield chunk
+            async with client.stream("POST", upstream_url, json=body, headers=headers) as resp:
+                async for chunk in resp.aiter_bytes():
+                    yield chunk
 
         return StreamingResponse(stream_upstream(), media_type="text/event-stream")
 

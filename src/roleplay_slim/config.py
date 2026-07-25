@@ -109,6 +109,10 @@ class CompressorConfig:
     def from_toml(cls, path: str | Path) -> "CompressorConfig":
         with open(path, "rb") as f:
             data = tomllib.load(f)
+        return cls.from_dict(data)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CompressorConfig":
         section = data.get("compressor", data)
         known = {f.name for f in cls.__dataclass_fields__.values()}
         kwargs = {k: v for k, v in section.items() if k in known}
@@ -128,7 +132,7 @@ class ProxyConfig:
         with open(path, "rb") as f:
             data = tomllib.load(f)
         proxy_section = data.get("proxy", {})
-        compressor = CompressorConfig.from_toml(path)
+        compressor = CompressorConfig.from_dict(data)
         known = {"upstream_base_url", "upstream_api_key_env", "host", "port"}
         kwargs = {k: v for k, v in proxy_section.items() if k in known}
         return cls(compressor=compressor, **kwargs)

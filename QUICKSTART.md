@@ -1,57 +1,54 @@
-# Quick Start (no prior experience needed)
+# Quick Start
 
-This guide assumes nothing except: you have a chat app or bot that talks to
-an LLM API (like DeepSeek or OpenAI), and you want it to send less text per
-request without changing how the conversation looks or feels.
+If you've never touched Python before, don't worry — this doesn't assume
+anything beyond "I have a chat app or bot that talks to an LLM API (like
+DeepSeek or OpenAI) and I want it to send less text per request."
 
-## Step 1 — Install Python (skip if you already have it)
+## 1. Get Python installed
 
-Download from [python.org](https://www.python.org/downloads/) — version
-3.10 or newer. On Windows, tick "Add python.exe to PATH" during install.
-
-Check it worked by opening a terminal (PowerShell on Windows, Terminal on
-Mac/Linux) and typing:
+If `python --version` already works in your terminal, skip this.
+Otherwise grab it from [python.org](https://www.python.org/downloads/),
+3.10 or newer. On Windows, check the "Add python.exe to PATH" box during
+setup or none of the later commands will work.
 
 ```bash
 python --version
 ```
 
-You should see something like `Python 3.12.0`.
+Should print something like `Python 3.12.0`.
 
-## Step 2 — Install roleplay-slim
-
-In the same terminal:
+## 2. Install the package
 
 ```bash
 pip install "roleplay-slim[all]"
 ```
 
-`[all]` installs everything in one shot (the proxy server pieces, plus
-accurate token-count stats) so you don't need to think about which extra
-name to type — the whole thing is under 5 MB. If you only plan to
-`import` this inside your own Python code and never run the standalone
-proxy, you can drop down to a plain `pip install roleplay-slim` instead.
+That pulls in the proxy server and the more accurate token-counting stats
+in one go, so you don't have to figure out which extra you need. Total
+download is under 5 MB. If you're just going to `import` this in your own
+code and skip the standalone server entirely, `pip install roleplay-slim`
+on its own is fine too.
 
-## Step 3 — Get your real API key ready
+## 3. Have your API key ready
 
-You need whatever API key you already use for DeepSeek, OpenAI, or another
-OpenAI-compatible provider. Set it as an environment variable so
-roleplay-slim can read it without you typing it into a config file:
+Whatever key you already use for DeepSeek, OpenAI, or another compatible
+provider works here. Put it in an environment variable instead of typing
+it into a config file:
 
-**Windows (PowerShell):**
 ```powershell
-$env:UPSTREAM_API_KEY = "sk-your-real-key-here"
+# Windows PowerShell
+$env:UPSTREAM_API_KEY = "sk-your-real-key"
 ```
 
-**Mac/Linux:**
 ```bash
-export UPSTREAM_API_KEY="sk-your-real-key-here"
+# Mac/Linux
+export UPSTREAM_API_KEY="sk-your-real-key"
 ```
 
-## Step 4 — Create a config file
+## 4. Write a small config file
 
-Make a file called `my_config.toml` with this content (adjust
-`upstream_base_url` if you're not using DeepSeek):
+Save this as `my_config.toml` (swap `upstream_base_url` if you're not on
+DeepSeek):
 
 ```toml
 [proxy]
@@ -65,66 +62,64 @@ keep_recent_turns = 3
 enable_strip_stage_directions = false
 ```
 
-Don't worry about understanding every line — these defaults work for most
-chat apps out of the box. The one setting worth knowing:
-`keep_recent_turns` controls how many of the most recent back-and-forth
-exchanges are always sent in full, untouched.
+You don't need to understand every field to get started — these defaults
+are sane for most chat apps. The one to actually think about is
+`keep_recent_turns`: it's how many of the most recent exchanges get sent
+completely untouched.
 
-## Step 5 — Run it
+## 5. Start it up
 
 ```bash
 roleplay-slim-proxy --config my_config.toml
 ```
 
-You should see:
+Once it's running you'll see something like:
 
 ```
 INFO:     Uvicorn running on http://127.0.0.1:8791 (Press CTRL+C to quit)
 ```
 
-Leave this window open — it's now running as a small local server.
+Keep that terminal open. It's a small local server now.
 
-## Step 6 — Point your app at it
+## 6. Point your app at it
 
-In whatever app or bot you already have, find the setting for the API's
-"base URL" (sometimes called `api_base`, `base_url`, or similar) and change
-it from the real provider's URL to:
+Find wherever your app or bot sets its API base URL (sometimes called
+`api_base`, sometimes `base_url`) and swap it for:
 
 ```
 http://127.0.0.1:8791/v1
 ```
 
-Everything else about your app stays exactly the same — same API key
-handling on your app's side, same request format. roleplay-slim sits in
-the middle, shrinks the conversation history a bit, and forwards
-everything else untouched.
+That's it — no other code changes. Your app keeps handling its API key
+and request format exactly the same way; roleplay-slim just sits in the
+middle, trims the conversation history a bit, and passes everything else
+straight through.
 
-## Step 7 — Watch it work
+## 7. Confirm it's actually doing something
 
-Use your app normally. Back in the terminal window from Step 5, you'll see
-a line print for every request:
+Use the app like normal. Back in the terminal from step 5, you'll get a
+line per request:
 
 ```
 [roleplay-slim] request #1 | 1204 -> 891 tokens (saved 313, 26.0%)
 ```
 
-That's the compression working — no reply-quality guessing needed on your
-part, the number is right there.
+That number is the proof — you don't have to take anyone's word for
+whether compression is happening. `http://127.0.0.1:8791/stats` in a
+browser gives you the running totals if you want them in JSON instead.
 
-You can also open `http://127.0.0.1:8791/stats` in a browser at any time to
-see running totals across every request so far.
+## If something's not working
 
-## Something not working?
+**"command not found: roleplay-slim-proxy"** — install probably didn't
+finish, or it landed somewhere your PATH doesn't check. Run
+`python -m roleplay_slim.proxy --config my_config.toml` instead; does the
+same thing.
 
-- **"command not found: roleplay-slim-proxy"** — the install in Step 2
-  didn't finish, or your terminal's PATH doesn't include where pip
-  installed it. Try `python -m roleplay_slim.proxy --config my_config.toml`
-  instead — same effect, different way to launch it.
-- **Your app gets an authorization error** — double-check
-  `UPSTREAM_API_KEY` in Step 3 is the *same terminal session* you're
-  running Step 5 from (environment variables don't carry over between
-  separate terminal windows unless you set them again).
-- **Replies look worse than before** — turn off
-  `enable_strip_stage_directions` if you turned it on (it's off by
-  default), and lower `keep_recent_turns` back up if you set it low. See
-  the main [README](README.md) for what each setting actually does.
+**App can't authenticate** — make sure `UPSTREAM_API_KEY` was set in the
+*same* terminal window you launched the proxy from. It doesn't carry over
+to a new window automatically.
+
+**Replies got worse** — if you turned on `enable_strip_stage_directions`,
+switch it back off (it defaults to off for a reason). If you cranked
+`keep_recent_turns` down low, bring it back up. Details on what each
+setting actually does are in the [README](README.md).
