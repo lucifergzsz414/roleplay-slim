@@ -7,13 +7,15 @@ estimate otherwise so the library has no hard dependency on it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
+_ENC: Any = None
 try:
     import tiktoken
 
     _ENC = tiktoken.get_encoding("cl100k_base")
 except Exception:  # pragma: no cover - exercised only when tiktoken is absent
-    _ENC = None
+    pass
 
 
 def estimate_tokens(text: str) -> int:

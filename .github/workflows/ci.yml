@@ -20,3 +20,5 @@ jobs:
         run: pip install -e ".[dev,proxy,tokens]"
       - name: Run tests
         run: pytest -v
+      - name: Type check
+        run: mypy

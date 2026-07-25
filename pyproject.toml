@@ -25,6 +25,7 @@ tokens = [
 dev = [
     "pytest>=8.0",
     "hypothesis>=6.100",
+    "mypy>=1.10",
 ]
 
 [project.scripts]
@@ -32,3 +33,10 @@ roleplay-slim-proxy = "roleplay_slim.proxy.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/roleplay_slim"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["roleplay_slim"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
