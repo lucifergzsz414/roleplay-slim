@@ -73,3 +73,42 @@ def test_default_config_never_crashes_on_minimal_input():
     messages = [{"role": "user", "content": "hi"}]
     result = compress(messages)
     assert result == [{"role": "user", "content": "hi"}]
+
+
+def test_recurring_footer_survives_even_when_every_copy_is_in_pruned_turns():
+    """Regression test for a real bug found 2026-07-25 via a live DeepSeek
+    A/B call: a footer/format-reminder repeated across every turn got
+    deduped down to one copy, but that copy landed in a turn
+    history_window then classified as "old" and dropped in trim mode —
+    silently deleting the only remaining copy of a mandatory reply-format
+    instruction. The reply generated from the compressed request visibly
+    skipped the format the uncompressed request's reply followed.
+
+    Reordering dedupe vs. history_window alone does NOT fix this — a
+    recurring instruction can legitimately live only in turns older than
+    the keep window (verified empirically after first trying that fix and
+    still reproducing the missing footer). The actual fix: snapshot which
+    system messages recur across 2+ turns *before* any pruning runs, and
+    if every copy of a recurring text is gone after compression, re-attach
+    one copy at the end — mirroring how qqbot's own build_reply() appends
+    its footer fresh, as the final message, on every real call rather than
+    relying on it surviving from stored history.
+    """
+    footer = "[FORMAT RULE] End every reply with a mood tag."
+    messages = [{"role": "system", "content": "persona"}]
+    for i in range(4):
+        messages.append({"role": "user", "content": f"question {i}"})
+        messages.append({"role": "assistant", "content": f"answer {i}"})
+        messages.append({"role": "system", "content": footer})
+    messages.append({"role": "user", "content": "final pending question"})
+
+    config = CompressorConfig(keep_recent_turns=1, history_window_mode="trim")
+    result = compress(messages, config)
+
+    footer_occurrences = sum(1 for m in result if m.get("content") == footer)
+    assert footer_occurrences == 1, (
+        "a recurring instruction must survive exactly once, even if every "
+        "turn that originally carried it gets pruned by history_window"
+    )
+    # and it must land after the pending question, not before it
+    assert result[-1] == {"role": "system", "content": footer}
