@@ -23,6 +23,21 @@ def whitespace_normalize(text: str) -> str:
     return text.strip()
 
 
+def content_key(content) -> str:
+    """A hashable, comparable identity for a message's `content` field.
+    OpenAI's vision API allows `content` to be a list of parts (text +
+    image_url blocks) instead of a plain string — real apps use this (seen
+    in a real third-party app's own message-building code, which branches
+    on `isinstance(content, list)`). Lists aren't hashable, so anything
+    that needs to compare/dedupe content by equality (this function's
+    callers) needs a stable string key instead of the raw value."""
+    if isinstance(content, str):
+        return content
+    import json
+
+    return json.dumps(content, sort_keys=True, default=str)
+
+
 def dedupe_verbatim_tail(turns: list[Turn]) -> list[Turn]:
     """If the exact same system-message text appears more than once across
     the dynamic region (e.g. a format-reminder footer repeated every
@@ -36,11 +51,11 @@ def dedupe_verbatim_tail(turns: list[Turn]) -> list[Turn]:
             m = turns[ti].messages[mi]
             if m.get("role") != "system":
                 continue
-            content = m.get("content", "")
-            if content in seen_system_texts:
+            key = content_key(m.get("content", ""))
+            if key in seen_system_texts:
                 keep_flags[ti][mi] = False
             else:
-                seen_system_texts.add(content)
+                seen_system_texts.add(key)
 
     new_turns: list[Turn] = []
     for ti, turn in enumerate(turns):
@@ -80,7 +95,15 @@ def history_window(turns: list[Turn], config: CompressorConfig) -> list[Turn]:
         new_messages = []
         for m in turn.messages:
             if m.get("role") in ("user", "assistant"):
-                new_messages.append({**m, "content": _extractive_trim(m.get("content", ""))})
+                content = m.get("content", "")
+                # Multimodal content (a list of text/image_url parts, per
+                # the OpenAI vision format) isn't plain text — trimming it
+                # with sentence-boundary regex would crash or corrupt an
+                # image reference, so leave it untouched rather than guess.
+                if isinstance(content, str):
+                    new_messages.append({**m, "content": _extractive_trim(content)})
+                else:
+                    new_messages.append(m)
             # Older system messages (footers, memory blocks) in dropped
             # turns carry little standalone value once the turn itself has
             # been trimmed — drop them here; dedupe_verbatim_tail already
@@ -104,12 +127,15 @@ def strip_stage_directions(turns: list[Turn], config: CompressorConfig, keep_rec
             continue
         new_messages = []
         for m in turn.messages:
-            if m.get("role") in ("user", "assistant"):
-                stripped = pattern.sub("", m.get("content", ""))
+            content = m.get("content", "")
+            if m.get("role") in ("user", "assistant") and isinstance(content, str):
+                stripped = pattern.sub("", content)
                 stripped = whitespace_normalize(stripped)
                 if stripped:
                     new_messages.append({**m, "content": stripped})
             else:
+                # Non-string (multimodal) content passes through untouched
+                # — see the history_window comment above for why.
                 new_messages.append(m)
         if new_messages:
             new_turns.append(Turn(new_messages))

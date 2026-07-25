@@ -75,6 +75,57 @@ def test_default_config_never_crashes_on_minimal_input():
     assert result == [{"role": "user", "content": "hi"}]
 
 
+def test_multimodal_content_does_not_crash_the_compressor():
+    """Regression test: OpenAI's vision API allows `content` to be a list
+    of {"type": "text"|"image_url", ...} parts instead of a plain string —
+    a real third-party app's own message-building code branches on this
+    (`isinstance(content, list)`). The compressor originally assumed every
+    `content` was a string and crashed with a TypeError as soon as any
+    text-manipulation strategy (whitespace_normalize, extractive trim,
+    stage-direction stripping) or the dict/set-keyed dedup logic touched a
+    list-content message."""
+    messages = [
+        {"role": "system", "content": "persona"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "（挥手）what's in this image?"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+            ],
+        },
+    ]
+    config = CompressorConfig(
+        keep_recent_turns=0,  # force every strategy to actually touch this message
+        enable_strip_stage_directions=True,
+    )
+    result = compress(messages, config)  # must not raise
+
+    image_message = next(m for m in result if isinstance(m.get("content"), list))
+    # multimodal content passes through byte-for-byte unmodified rather
+    # than being guessed at
+    assert image_message["content"] == messages[-1]["content"]
+
+
+def test_multimodal_system_message_does_not_break_recurring_hoist():
+    """The recurring-instruction snapshot/hoist mechanism (see compressor.py)
+    keys messages by content for equality/dedup — must not crash when a
+    system message's content is an unhashable list."""
+    list_content = [{"type": "text", "text": "structured note"}]
+    messages = [
+        {"role": "system", "content": "persona"},
+        {"role": "user", "content": "u0"},
+        {"role": "system", "content": list_content},
+        {"role": "user", "content": "u1"},
+        {"role": "system", "content": list_content},
+        {"role": "user", "content": "u2 final"},
+    ]
+    config = CompressorConfig(keep_recent_turns=0, history_window_mode="drop")
+    result = compress(messages, config)  # must not raise
+    assert any(m.get("content") == list_content for m in result)
+
+
 def test_recurring_footer_survives_even_when_every_copy_is_in_pruned_turns():
     """Regression test for a real bug found 2026-07-25 via a live DeepSeek
     A/B call: a footer/format-reminder repeated across every turn got

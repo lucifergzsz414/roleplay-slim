@@ -24,8 +24,26 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _text_of(content) -> str:
+    """Extract the text portion of a message's content field. OpenAI's
+    vision API allows content to be a list of {"type": "text"|"image_url",
+    ...} parts instead of a plain string; only the text parts have a
+    meaningful token count here — an image's real cost depends on
+    provider-specific pixel/tile accounting this library doesn't attempt
+    to model, so it's simply not counted rather than guessed at."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                parts.append(str(part.get("text", "")))
+        return "\n".join(parts)
+    return ""
+
+
 def estimate_messages_tokens(messages: list[dict]) -> int:
-    return sum(estimate_tokens(m.get("content", "") or "") for m in messages)
+    return sum(estimate_tokens(_text_of(m.get("content", ""))) for m in messages)
 
 
 @dataclass

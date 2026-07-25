@@ -64,6 +64,14 @@ multi-provider wire-format translation (OpenAI format only — covers
 DeepSeek and most others), no cross-request semantic cache/vector store,
 no GUI.
 
+## Multimodal content
+
+`content` can be a plain string or an OpenAI-style list of `{"type":
+"text"|"image_url", ...}` parts (vision requests). Every text-manipulating
+strategy only ever touches string content — a list is passed through
+byte-for-byte unmodified rather than guessed at. Token estimates only
+count the text parts of a multimodal message; image cost isn't modeled.
+
 ## Testing
 
 Hand-picked fixtures alone missed a real bug (a recurring instruction could

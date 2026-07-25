@@ -39,7 +39,18 @@ def messages_strategy(draw):
     n_turns = draw(st.integers(min_value=0, max_value=8))
     dynamic: list[dict] = []
     for i in range(n_turns):
-        dynamic.append({"role": "user", "content": f"user turn {i}. Some text here. More text."})
+        # Occasionally use OpenAI-style multimodal content (a list of
+        # text/image_url parts) instead of a plain string -- real apps
+        # send this for vision requests, and it isn't hashable, which
+        # broke the dict/set-keyed dedup logic before that was fixed.
+        if draw(st.booleans()):
+            user_content = f"user turn {i}. Some text here. More text."
+        else:
+            user_content = [
+                {"type": "text", "text": f"user turn {i} multimodal"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+            ]
+        dynamic.append({"role": "user", "content": user_content})
         if draw(st.booleans()):
             dynamic.append({"role": "assistant", "content": f"assistant turn {i}. A reply. Another sentence."})
         n_system = draw(st.integers(min_value=0, max_value=2))
@@ -103,12 +114,15 @@ def test_recurring_system_messages_never_vanish_entirely(messages, config):
 @settings(max_examples=300, deadline=None)
 def test_output_is_well_formed(messages, config):
     """compress() must never crash on any well-formed input, and must
-    never produce a message with an invalid role or non-string content."""
+    never produce a message with an invalid role or a content field of an
+    unexpected type. content may legitimately be a string OR an OpenAI-
+    style list of multimodal parts (text/image_url) -- it must never come
+    out corrupted into some third shape."""
     result = compress(messages, config)
     assert isinstance(result, list)
     for m in result:
         assert m.get("role") in VALID_ROLES
-        assert isinstance(m.get("content"), str)
+        assert isinstance(m.get("content"), (str, list))
 
 
 @given(messages=messages_strategy(), config=config_strategy())

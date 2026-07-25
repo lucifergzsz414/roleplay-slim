@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .config import CompressorConfig
 from .segmenter import Turn, segment
-from .strategies import dedupe_verbatim_tail, history_window, strip_stage_directions, whitespace_normalize
+from .strategies import content_key, dedupe_verbatim_tail, history_window, strip_stage_directions, whitespace_normalize
 
 
 def _turns_to_messages(turns: list[Turn]) -> list[dict]:
@@ -13,18 +13,23 @@ def _turns_to_messages(turns: list[Turn]) -> list[dict]:
     return out
 
 
-def _find_recurring_system_texts(turns: list[Turn]) -> set[str]:
+def _find_recurring_system_texts(turns: list[Turn]) -> dict[str, object]:
     """System-message content that appears in 2+ of the original turns
     reads as a recurring per-request instruction (a footer/format
     reminder), not a one-off note — it must not be silently lost even if
-    every turn that happened to carry a copy gets pruned away."""
+    every turn that happened to carry a copy gets pruned away. Keyed by
+    content_key() rather than the raw content since content can be a list
+    (OpenAI-style multimodal parts), which isn't hashable."""
     counts: dict[str, int] = {}
+    values: dict[str, object] = {}
     for turn in turns:
         for m in turn.messages:
             if m.get("role") == "system":
                 content = m.get("content", "")
-                counts[content] = counts.get(content, 0) + 1
-    return {text for text, n in counts.items() if n >= 2}
+                key = content_key(content)
+                counts[key] = counts.get(key, 0) + 1
+                values[key] = content
+    return {key: values[key] for key, n in counts.items() if n >= 2}
 
 
 def compress(messages: list[dict], config: CompressorConfig | None = None) -> list[dict]:
@@ -64,14 +69,16 @@ def compress(messages: list[dict], config: CompressorConfig | None = None) -> li
 
     dynamic = _turns_to_messages(turns)
 
-    surviving_system_texts = {m.get("content", "") for m in dynamic if m.get("role") == "system"}
-    for text in recurring_system_texts:
-        if text not in surviving_system_texts:
-            dynamic.append({"role": "system", "content": text})
+    surviving_keys = {content_key(m.get("content", "")) for m in dynamic if m.get("role") == "system"}
+    for key, content in recurring_system_texts.items():
+        if key not in surviving_keys:
+            dynamic.append({"role": "system", "content": content})
 
     if config.enable_whitespace_normalize:
         dynamic = [
-            {**m, "content": whitespace_normalize(m.get("content", ""))} if m.get("content") else m
+            {**m, "content": whitespace_normalize(m["content"])}
+            if m.get("content") and isinstance(m["content"], str)
+            else m
             for m in dynamic
         ]
 
