@@ -3,6 +3,7 @@ from roleplay_slim.segmenter import Turn
 from roleplay_slim.strategies import (
     dedupe_verbatim_tail,
     history_window,
+    normalize_prefix_timestamps,
     strip_stage_directions,
     whitespace_normalize,
 )
@@ -11,6 +12,34 @@ from roleplay_slim.strategies import (
 def test_whitespace_normalize_collapses_runs_and_trims():
     text = "  hi\n\n\n\nthere   \n"
     assert whitespace_normalize(text) == "hi\n\nthere"
+
+
+def test_normalize_prefix_timestamps_rounds_down_to_bucket():
+    text = "current time: 2026-07-25T14:23:47Z"
+    assert normalize_prefix_timestamps(text, 5) == "current time: 2026-07-25T14:20:00Z"
+
+
+def test_normalize_prefix_timestamps_respects_timezone_offset():
+    text = "ts=2026-07-25T09:07:12+08:00"
+    assert normalize_prefix_timestamps(text, 10) == "ts=2026-07-25T09:00:00+08:00"
+
+
+def test_normalize_prefix_timestamps_bucket_zero_is_noop():
+    text = "current time: 2026-07-25T14:23:47Z"
+    assert normalize_prefix_timestamps(text, 0) == text
+
+
+def test_normalize_prefix_timestamps_ignores_non_matching_text():
+    text = "no timestamps here, just plain roleplay dialogue."
+    assert normalize_prefix_timestamps(text, 5) == text
+
+
+def test_normalize_prefix_timestamps_handles_multiple_occurrences():
+    text = "start=2026-07-25T14:23:47Z end=2026-07-25T14:41:02Z"
+    assert (
+        normalize_prefix_timestamps(text, 15)
+        == "start=2026-07-25T14:15:00Z end=2026-07-25T14:30:00Z"
+    )
 
 
 def test_dedupe_verbatim_tail_keeps_last_occurrence_only():

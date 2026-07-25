@@ -44,3 +44,19 @@ def test_all_presets_are_valid_regexes():
 
     for name, pattern in STAGE_DIRECTION_PRESETS.items():
         re.compile(pattern)  # must not raise
+
+
+def test_prefix_normalize_disabled_by_default():
+    config = CompressorConfig()
+    assert config.enable_prefix_normalize is False
+    assert config.prefix_timestamp_bucket_minutes == 5
+
+
+def test_prefix_timestamp_bucket_minutes_zero_rejected():
+    with pytest.raises(ValueError, match="prefix_timestamp_bucket_minutes"):
+        CompressorConfig(prefix_timestamp_bucket_minutes=0)
+
+
+def test_prefix_timestamp_bucket_minutes_over_60_rejected():
+    with pytest.raises(ValueError, match="prefix_timestamp_bucket_minutes"):
+        CompressorConfig(prefix_timestamp_bucket_minutes=61)

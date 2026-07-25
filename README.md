@@ -48,6 +48,17 @@ roleplay-slim's default heuristic auto-detects that split — every leading
 **byte-for-byte untouched**; compression only ever runs on what comes
 after. No per-app config required to get that much for free.
 
+This is a real guarantee, not a best-effort one: `compress()` never runs a
+single transform on the prefix region by default. That's a different
+approach from, say, [Kompact](https://github.com/npow/kompact)'s "Cache
+Aligner" (verified by reading its source, not just its README) — Kompact
+lets earlier layers in its pipeline compress the system prompt like
+anything else, then tries to restore cache-ability afterward by finding
+volatile substrings (UUIDs, timestamps) and replacing them with opaque
+placeholders. roleplay-slim instead identifies the prefix *before* any
+strategy runs and simply never touches it — no reconstruction needed
+because nothing was changed in the first place.
+
 ## What it compresses (v0.1, all rule-based — no ML model, no lossy
 semantic scoring)
 
@@ -63,6 +74,30 @@ contributing): no LLMLingua-style ML-based semantic compression, no
 multi-provider wire-format translation (OpenAI format only — covers
 DeepSeek and most others), no cross-request semantic cache/vector store,
 no GUI.
+
+### If your own prefix isn't actually static
+
+The byte-for-byte guarantee above only helps if your prefix genuinely is
+identical across requests. If your app embeds something that changes
+every call — most commonly a live timestamp baked into the persona/shared
+config block — the prefix breaks the provider's cache on its own, and
+roleplay-slim's default behavior (never touch it) can't fix that for you.
+
+`enable_prefix_normalize` (off by default) is a narrow, opt-in escape
+hatch for exactly that case: it rounds ISO-8601 timestamps found in the
+prefix down to the nearest `prefix_timestamp_bucket_minutes` boundary
+(default 5) instead of leaving them exact to the second. Unlike stripping
+the timestamp into an opaque placeholder, this keeps genuinely useful
+time-of-day information — a roleplay persona often needs to know roughly
+what time it is — while still making requests within the same bucket
+window byte-identical.
+
+```python
+config = CompressorConfig(
+    enable_prefix_normalize=True,
+    prefix_timestamp_bucket_minutes=5,
+)
+```
 
 ## Multimodal content
 

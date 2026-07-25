@@ -69,6 +69,15 @@ class CompressorConfig:
     # cache-stable prefix doesn't match that heuristic.
     prefix_override: int | None = None
 
+    # Off by default: the prefix is otherwise guaranteed byte-for-byte
+    # untouched. Turn this on only if your own prefix embeds a live
+    # timestamp (defeating the provider's cache on every single request
+    # regardless of anything else this library does) — it rounds ISO-8601
+    # timestamps found in the prefix down to the nearest
+    # prefix_timestamp_bucket_minutes boundary instead of leaving them exact.
+    enable_prefix_normalize: bool = False
+    prefix_timestamp_bucket_minutes: int = 5
+
     def __post_init__(self) -> None:
         if self.keep_recent_turns < 0:
             raise ValueError(f"keep_recent_turns must be >= 0, got {self.keep_recent_turns}")
@@ -78,6 +87,11 @@ class CompressorConfig:
             )
         if self.prefix_override is not None and self.prefix_override < 0:
             raise ValueError(f"prefix_override must be >= 0 or None, got {self.prefix_override}")
+        if not (1 <= self.prefix_timestamp_bucket_minutes <= 60):
+            raise ValueError(
+                "prefix_timestamp_bucket_minutes must be between 1 and 60, "
+                f"got {self.prefix_timestamp_bucket_minutes}"
+            )
 
         # Resolve a preset name to its regex; a value that isn't a known
         # preset name is assumed to already be a raw regex.

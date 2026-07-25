@@ -3,7 +3,14 @@ from __future__ import annotations
 
 from .config import CompressorConfig
 from .segmenter import Turn, segment
-from .strategies import content_key, dedupe_verbatim_tail, history_window, strip_stage_directions, whitespace_normalize
+from .strategies import (
+    content_key,
+    dedupe_verbatim_tail,
+    history_window,
+    normalize_prefix_timestamps,
+    strip_stage_directions,
+    whitespace_normalize,
+)
 
 
 def _turns_to_messages(turns: list[Turn]) -> list[dict]:
@@ -43,6 +50,24 @@ def compress(messages: list[dict], config: CompressorConfig | None = None) -> li
     """
     config = config or CompressorConfig()
     prefix, turns = segment(messages, config.prefix_override)
+
+    # Off by default. The prefix is otherwise guaranteed byte-for-byte
+    # untouched (see the docstring above) — this is the one opt-in
+    # exception, for apps whose prefix embeds a live timestamp that would
+    # otherwise defeat the provider's cache on every single request no
+    # matter what else this library does.
+    if config.enable_prefix_normalize:
+        prefix = [
+            {
+                **m,
+                "content": normalize_prefix_timestamps(
+                    m["content"], config.prefix_timestamp_bucket_minutes
+                ),
+            }
+            if m.get("role") == "system" and isinstance(m.get("content"), str)
+            else m
+            for m in prefix
+        ]
 
     # Snapshot which system messages recur across turns *before* any
     # pruning — real bug found 2026-07-25 via a live DeepSeek A/B call: a

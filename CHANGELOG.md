@@ -17,6 +17,13 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
   `asterisk`, `square_bracket`) for `stage_direction_pattern`, so most apps don't need
   to write their own regex.
 - `py.typed` marker — the package now advertises inline type hints to type checkers.
+- `enable_prefix_normalize` / `prefix_timestamp_bucket_minutes` (off by default): an opt-in
+  escape hatch for apps whose prefix embeds a live timestamp, which otherwise defeats the
+  provider's cache on every request regardless of anything else this library does. Rounds
+  ISO-8601 timestamps in the prefix down to a bucket boundary instead of leaving them exact
+  — deliberately not a placeholder-style replacement (unlike Kompact's Cache Aligner), since
+  a roleplay persona often genuinely needs approximate time-of-day information. Added after
+  actually reading Kompact's `cache_aligner.py` source to verify how it differs (see below).
 
 ### Fixed
 - `compress()` no longer crashes on OpenAI-style multimodal `content` (a list of

@@ -23,6 +23,37 @@ def whitespace_normalize(text: str) -> str:
     return text.strip()
 
 
+_ISO_TIMESTAMP_RE = re.compile(
+    r"\b(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?\b"
+)
+
+
+def normalize_prefix_timestamps(text: str, bucket_minutes: int) -> str:
+    """Round ISO-8601 timestamps down to the nearest `bucket_minutes`
+    boundary (e.g. 14:23:47 -> 14:20:00 with bucket_minutes=5).
+
+    This exists for apps that embed a live timestamp inside the prefix
+    (persona/instructions) region — otherwise that timestamp changes every
+    request and defeats the provider's prefix cache regardless of anything
+    else roleplay-slim does, since the prefix is never touched by default.
+
+    Deliberately *not* a placeholder-style replacement (swap the timestamp
+    for an opaque token like Kompact's cache aligner does): a roleplay
+    persona often genuinely needs to know roughly what time it is to react
+    in character, so this keeps real, still-useful time-of-day information
+    instead of discarding it. bucket_minutes=0 is a no-op.
+    """
+    if bucket_minutes <= 0:
+        return text
+
+    def _bucket(match: re.Match) -> str:
+        date_part, hour, minute, _second, tz = match.groups()
+        bucketed_minute = (int(minute) // bucket_minutes) * bucket_minutes
+        return f"{date_part}T{int(hour):02d}:{bucketed_minute:02d}:00{tz or ''}"
+
+    return _ISO_TIMESTAMP_RE.sub(_bucket, text)
+
+
 def content_key(content) -> str:
     """A hashable, comparable identity for a message's `content` field.
     OpenAI's vision API allows `content` to be a list of parts (text +

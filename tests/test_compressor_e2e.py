@@ -163,3 +163,28 @@ def test_recurring_footer_survives_even_when_every_copy_is_in_pruned_turns():
     )
     # and it must land after the pending question, not before it
     assert result[-1] == {"role": "system", "content": footer}
+
+
+def test_prefix_normalize_disabled_by_default_leaves_prefix_byte_identical():
+    """A prefix that happens to embed a live timestamp is still returned
+    completely untouched unless enable_prefix_normalize is explicitly on —
+    the byte-identical guarantee holds by default."""
+    messages = [
+        {"role": "system", "content": "persona. current time: 2026-07-25T14:23:47Z"},
+        {"role": "user", "content": "hi"},
+    ]
+    result = compress(messages, CompressorConfig())
+    assert result[0] == messages[0]
+
+
+def test_prefix_normalize_buckets_timestamp_when_enabled():
+    """Opt-in: apps whose prefix embeds a live timestamp (which would
+    otherwise defeat the provider's cache on every single request) can turn
+    this on to round it down to a bucket boundary instead."""
+    messages = [
+        {"role": "system", "content": "persona. current time: 2026-07-25T14:23:47Z"},
+        {"role": "user", "content": "hi"},
+    ]
+    config = CompressorConfig(enable_prefix_normalize=True, prefix_timestamp_bucket_minutes=5)
+    result = compress(messages, config)
+    assert result[0]["content"] == "persona. current time: 2026-07-25T14:20:00Z"
