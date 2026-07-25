@@ -64,6 +64,18 @@ multi-provider wire-format translation (OpenAI format only — covers
 DeepSeek and most others), no cross-request semantic cache/vector store,
 no GUI.
 
+## Testing
+
+Hand-picked fixtures alone missed a real bug (a recurring instruction could
+be silently pruned depending on which turns happened to carry it — see the
+commit history). In addition to the fixture-based tests,
+`tests/test_properties.py` uses [Hypothesis](https://hypothesis.readthedocs.io/)
+to generate a wide range of message-array shapes (varying prefix length,
+turn count, and which system messages repeat across turns) and checks
+invariants that must hold for *any* input — the prefix survives unchanged,
+a recurring instruction never vanishes entirely, output stays well-formed.
+Run `pytest` to execute both.
+
 ## Install
 
 ```bash
