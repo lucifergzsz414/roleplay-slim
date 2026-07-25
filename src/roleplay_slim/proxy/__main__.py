@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 
 from ..config import ProxyConfig
 from .server import create_app
@@ -21,6 +22,13 @@ def main() -> None:
         config.host = args.host
     if args.upstream is not None:
         config.upstream_base_url = args.upstream
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[roleplay-slim] %(message)s"))
+    rs_logger = logging.getLogger("roleplay_slim")
+    rs_logger.setLevel(logging.INFO)
+    rs_logger.addHandler(handler)
+    rs_logger.propagate = False
 
     import uvicorn
 

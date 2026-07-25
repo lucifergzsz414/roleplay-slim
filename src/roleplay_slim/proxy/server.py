@@ -6,6 +6,7 @@ including the response — streamed or not — passes through untouched.
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import AsyncIterator
 
@@ -16,6 +17,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from ..compressor import compress
 from ..config import ProxyConfig
 from ..stats import CompressionStats
+
+logger = logging.getLogger("roleplay_slim")
 
 
 def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
@@ -40,7 +43,16 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
         body = await request.json()
         messages = body.get("messages", [])
         compressed = compress(messages, config.compressor)
-        stats.record(messages, compressed)
+        entry = stats.record(messages, compressed)
+        pct = (entry["saved"] / entry["tokens_before"] * 100) if entry["tokens_before"] else 0.0
+        logger.info(
+            "request #%d | %d -> %d tokens (saved %d, %.1f%%)",
+            stats.request_count,
+            entry["tokens_before"],
+            entry["tokens_after"],
+            entry["saved"],
+            pct,
+        )
         body["messages"] = compressed
 
         headers = {"Content-Type": "application/json"}

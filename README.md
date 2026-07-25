@@ -4,6 +4,10 @@ Dialogue/roleplay-aware LLM context compression — a library and an
 OpenAI-compatible proxy that knows the difference between a **cache-stable
 persona prefix** and the **dialogue history you pay for on every request**.
 
+New to this and just want it running? See
+[QUICKSTART.md](QUICKSTART.md) ([中文版](QUICKSTART_CN.md)) — no prior
+experience assumed.
+
 ## Why this exists
 
 There's already a handful of LLM context-compression proxies on GitHub —
@@ -150,6 +154,16 @@ roleplay-slim-proxy --config examples/qqbot_style_config.toml
 Then point your app at `http://127.0.0.1:8791/v1` instead of the real
 provider — everything else (auth header passthrough, streaming) works the
 same.
+
+Every request prints a one-line summary to the terminal you ran it from,
+so you can see compression working without needing to poll `/stats`:
+
+```
+[roleplay-slim] request #1 | 1204 -> 891 tokens (saved 313, 26.0%)
+```
+
+`GET /stats` returns the same numbers as running totals, in JSON, if you
+want to pull them into your own monitoring instead.
 
 See `examples/qqbot_style_config.toml` for a config modeled on a real
 production roleplay bot's message structure.

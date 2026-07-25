@@ -99,6 +99,21 @@ def test_authorization_header_passthrough():
     assert captured["auth"] == "Bearer caller-supplied-key"
 
 
+def test_chat_completions_logs_a_readable_compression_summary(caplog):
+    """The proxy is typically run in a foreground terminal — a readable
+    per-request log line (not just the /stats JSON endpoint) is how most
+    people actually notice compression is working."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client = _make_client(handler)
+    with caplog.at_level("INFO", logger="roleplay_slim"):
+        client.post("/v1/chat/completions", json=_sample_body())
+
+    messages = [r.message for r in caplog.records if r.name == "roleplay_slim"]
+    assert any("request #1" in m and "tokens" in m for m in messages)
+
+
 def test_streaming_passthrough_is_not_corrupted():
     def handler(request: httpx.Request) -> httpx.Response:
         assert json.loads(request.content)["stream"] is True

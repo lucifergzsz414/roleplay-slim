@@ -24,6 +24,14 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
   — deliberately not a placeholder-style replacement (unlike Kompact's Cache Aligner), since
   a roleplay persona often genuinely needs approximate time-of-day information. Added after
   actually reading Kompact's `cache_aligner.py` source to verify how it differs (see below).
+- The proxy now prints a one-line, human-readable summary for every request
+  (`[roleplay-slim] request #1 | 1204 -> 891 tokens (saved 313, 26.0%)`) to whatever
+  terminal it's running in, instead of requiring a `/stats` poll to see anything is
+  happening. Scoped to roleplay-slim's own logger (not the root logger) so it doesn't
+  leak its prefix onto httpx's or uvicorn's own log lines.
+- `QUICKSTART.md` / `QUICKSTART_CN.md`: a from-zero setup guide (English + Chinese)
+  assuming no prior experience with Python packaging, environment variables, or this
+  project's own concepts — separate from the README, which assumes more context.
 
 ### Fixed
 - `compress()` no longer crashes on OpenAI-style multimodal `content` (a list of
