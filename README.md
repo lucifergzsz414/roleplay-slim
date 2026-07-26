@@ -16,6 +16,9 @@ every request**.
 [QUICKSTART.md](QUICKSTART.md) ([中文版](QUICKSTART_CN.md)) — no prior
 experience assumed.
 
+> **500-turn roleplay conversation** — 37,176 → 19,545 tokens (47.4% less),
+> persona prefix 100% preserved. [See benchmarks](#benchmarks) · [Try it in 30s](#30-second-tryout)
+
 ## What it does
 
 | | |
@@ -98,6 +101,33 @@ volatile substrings (UUIDs, timestamps) and replacing them with opaque
 placeholders. roleplay-slim instead identifies the prefix *before* any
 strategy runs and simply never touches it — no reconstruction needed
 because nothing was changed in the first place.
+
+---
+
+## Why not just use a generic compressor?
+
+Most compression tools treat every message the same way — they see a block of
+text and shrink it. That works for JSON or logs, but for roleplay dialogue it
+creates two problems:
+
+| | Generic compressor | roleplay-slim |
+|---|---|---|
+| **Persona prefix** | Compressed along with everything else — breaks the provider's prompt cache, and risks losing tone and phrasing | Left byte-for-byte untouched — hits the cache, character stays in character |
+| **Dialogue history** | Compressed uniformly — can't tell the difference between a stage direction, a repeated footer, and actual dialogue | Compresses intelligently — strips stage directions from old turns, dedupes footers, trims stale turns, keeps recent dialogue verbatim |
+
+```
+Generic:  [persona] [history] → [compressed blob] → LLM
+               ✗ cache broken    ✗ tone at risk
+
+Slim:     [persona] → [untouched] ───────────────→ LLM
+          [history] → [compressed] ───────────────→ LLM
+               ✓ cache hits       ✓ dialogue preserved
+```
+
+roleplay-slim's compression strategies only ever run on the dialogue portion —
+the persona prefix is structurally guaranteed to survive unchanged. That's not
+a "best effort, hope it works" claim; `compress()` never runs a single
+transform on the prefix region by default.
 
 ---
 
