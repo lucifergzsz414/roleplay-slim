@@ -1,5 +1,5 @@
 """Benchmark: measure token savings across different compressor configs
-on a synthetic 50-turn roleplay conversation.
+on synthetic roleplay conversations at 50, 200, and 500 turns.
 
 Generates numbers suitable for a README table — no real user data,
 no external dependencies beyond roleplay-slim itself."""
@@ -36,19 +36,6 @@ SCENES = [
      "（轻轻笑了一声）……看情况。"),
 ]
 
-LONG_TAIL = [
-    ("（翻着乐谱）接下来练哪首？",
-     "（指着第三页）这首。上次副歌的切分音我一直踩不准。"),
-    ("那个切分确实难，要不先把节奏型单独抽出来练？",
-     "（点头）好。你帮我打拍子。不要越打越快，上次就是。"),
-    ("（举手投降）上次那是激动了嘛。这次保证稳。",
-     "（嘴角动了动）信你一回。"),
-    ("练了大概四十分钟，中间停下来讨论了两次指法。切分终于稳了。",
-     "（用袖子擦了擦额头的汗）差不多到极限了。"),
-    ("辛苦了。收拾一下我请你喝东西，楼下奶茶店？",
-     "（站起来活动肩膀）……红豆烤奶，去冰。"),
-]
-
 
 def build_conversation(num_turns: int = 50) -> list[dict]:
     """Build a synthetic roleplay conversation with a realistic message
@@ -62,12 +49,6 @@ def build_conversation(num_turns: int = 50) -> list[dict]:
         scene = SCENES[i % len(SCENES)]
         messages.append({"role": "user", "content": scene[0]})
         messages.append({"role": "assistant", "content": scene[1]})
-        messages.append({"role": "system", "content": FOOTER})
-
-    # Append a few more turns from the long tail to push past 50
-    for i, (user_line, asst_line) in enumerate(LONG_TAIL):
-        messages.append({"role": "user", "content": user_line})
-        messages.append({"role": "assistant", "content": asst_line})
         messages.append({"role": "system", "content": FOOTER})
 
     return messages
@@ -86,40 +67,42 @@ def bench(label: str, config: CompressorConfig, messages: list[dict]):
 
 
 def main():
-    messages = build_conversation(50)
-    total_turns = (len(messages) - 2) // 3  # minus prefix, each turn = 3 msgs
+    scenarios = [50, 200, 500]
+    rows: list[tuple[int, int, int, int]] = []
 
-    print(f"roleplay-slim benchmark — {total_turns}-turn conversation "
-          f"({len(messages)} messages total, with 2-message cache-stable prefix)\n")
+    for turns in scenarios:
+        messages = build_conversation(turns)
+        msg_count = len(messages)
+        print(f"roleplay-slim benchmark — {turns}-turn conversation "
+              f"({msg_count} messages, 2-message cache-stable prefix)")
 
-    # Default config (keep_recent_turns=6, trim mode, no stage-direction stripping)
-    bench("default (keep=6, trim)", CompressorConfig(), messages)
+        default_cfg = CompressorConfig()
+        _, after_d_tok, _, _ = bench("  default (keep=6, trim)",
+                                     default_cfg, messages)
 
-    # Config matching example_config.toml (stage directions enabled)
-    bench("example_config.toml (keep=6, trim + strip)",
-          CompressorConfig(
-              keep_recent_turns=6,
-              enable_strip_stage_directions=True,
-              stage_direction_pattern="fullwidth_parens",
-          ),
-          messages)
+        example_cfg = CompressorConfig(
+            keep_recent_turns=6,
+            enable_strip_stage_directions=True,
+            stage_direction_pattern="fullwidth_parens",
+        )
+        _, after_e_tok, _, _ = bench("  example_config (keep=6, trim+strip)",
+                                     example_cfg, messages)
 
-    # Aggressive: fewer recent turns, stage-direction stripping on
-    bench("aggressive (keep=3, trim + strip)",
-          CompressorConfig(
-              keep_recent_turns=3,
-              enable_strip_stage_directions=True,
-          ),
-          messages)
+        before_tok = estimate_messages_tokens(messages)
+        rows.append((turns, before_tok, after_d_tok, after_e_tok))
+        print()
 
-    # Maximum compression: drop old turns entirely, strip directions
-    bench("max (keep=3, drop + strip)",
-          CompressorConfig(
-              keep_recent_turns=3,
-              history_window_mode="drop",
-              enable_strip_stage_directions=True,
-          ),
-          messages)
+    # Summary table
+    print("=" * 72)
+    print(f"{'Turns':>6}  {'Before':>7}  {'Default':>7}  {'Default %':>9}  "
+          f"{'Example':>7}  {'Example %':>9}")
+    print("-" * 72)
+    for turns, before, after_d, after_e in rows:
+        dpct = (before - after_d) / before * 100
+        epct = (before - after_e) / before * 100
+        print(f"{turns:>6}  {before:>7}  {after_d:>7}  {dpct:>8.1f}%  "
+              f"{after_e:>7}  {epct:>8.1f}%")
+    print("=" * 72)
 
 
 if __name__ == "__main__":
