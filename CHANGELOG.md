@@ -38,6 +38,9 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
   assuming no prior experience with Python packaging, environment variables, or this
   project's own concepts — separate from the README, which assumes more context.
 
+- The proxy now logs a clear warning at startup (not just a confusing 401 at the first
+  request) if no upstream API key is configured and no fallback env var is set.
+
 ### Fixed
 - `compress()` no longer crashes on OpenAI-style multimodal `content` (a list of
   `{"type": "text"|"image_url", ...}` parts instead of a plain string). Every

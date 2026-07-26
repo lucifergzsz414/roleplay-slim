@@ -29,6 +29,13 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
     without hitting a real upstream API."""
     stats = CompressionStats()
     api_key = os.environ.get(config.upstream_api_key_env, "")
+    if not api_key:
+        logger.warning(
+            "%s is not set and no environment fallback key is configured — "
+            "requests that don't carry their own Authorization header will be "
+            "sent upstream with no credentials and will likely get a 401",
+            config.upstream_api_key_env,
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -78,6 +78,15 @@ class CompressorConfig:
     enable_prefix_normalize: bool = False
     prefix_timestamp_bucket_minutes: int = 5
 
+    # Compiled once here in __post_init__ rather than by every
+    # strip_stage_directions() call — a compress() call only calls it once,
+    # so this isn't a hot-loop fix, but there's no reason to pay for it
+    # more than once per config either. Not a dataclass field: excluded
+    # from __init__/repr/eq so it doesn't change the public constructor.
+    _compiled_stage_direction_pattern: re.Pattern[str] | None = field(
+        init=False, repr=False, compare=False, default=None
+    )
+
     def __post_init__(self) -> None:
         if self.keep_recent_turns < 0:
             raise ValueError(f"keep_recent_turns must be >= 0, got {self.keep_recent_turns}")
@@ -97,13 +106,14 @@ class CompressorConfig:
         # preset name is assumed to already be a raw regex.
         pattern = STAGE_DIRECTION_PRESETS.get(self.stage_direction_pattern, self.stage_direction_pattern)
         try:
-            re.compile(pattern)
+            compiled = re.compile(pattern)
         except re.error as e:
             raise ValueError(
                 f"stage_direction_pattern is not a valid regex and not a known preset "
                 f"({sorted(STAGE_DIRECTION_PRESETS)}): {self.stage_direction_pattern!r} ({e})"
             ) from e
         self.stage_direction_pattern = pattern
+        self._compiled_stage_direction_pattern = compiled
 
     @classmethod
     def from_toml(cls, path: str | Path) -> "CompressorConfig":

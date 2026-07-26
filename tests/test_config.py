@@ -39,6 +39,13 @@ def test_raw_regex_passes_through_unchanged_when_not_a_preset_name():
     assert config.stage_direction_pattern == raw
 
 
+def test_stage_direction_pattern_is_precompiled_once():
+    config = CompressorConfig(stage_direction_pattern="asterisk")
+    compiled = config._compiled_stage_direction_pattern
+    assert compiled.pattern == STAGE_DIRECTION_PRESETS["asterisk"]
+    assert compiled.match("*waves*")
+
+
 def test_all_presets_are_valid_regexes():
     import re
 

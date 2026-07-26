@@ -149,7 +149,8 @@ def strip_stage_directions(turns: list[Turn], config: CompressorConfig, keep_rec
     from turns older than the most recent `keep_recent`, keeping the actual
     dialogue text intact. Recent turns are left fully alone — nuance matters
     most in what's just been said."""
-    pattern = re.compile(config.stage_direction_pattern)
+    pattern = config._compiled_stage_direction_pattern
+    assert pattern is not None  # always set by CompressorConfig.__post_init__
     cutoff = max(0, len(turns) - keep_recent)
     new_turns: list[Turn] = []
     for i, turn in enumerate(turns):

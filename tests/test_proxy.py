@@ -102,6 +102,30 @@ def test_authorization_header_passthrough():
     assert captured["auth"] == "Bearer caller-supplied-key"
 
 
+def test_warns_at_creation_when_no_upstream_key_is_configured(caplog):
+    """A forgotten UPSTREAM_API_KEY otherwise fails silently until the first
+    request hits a confusing 401 from upstream — this should be visible
+    immediately when the app is created instead."""
+    config = ProxyConfig(
+        compressor=CompressorConfig(),
+        upstream_api_key_env="ROLEPLAY_SLIM_TEST_DEFINITELY_UNSET_KEY",
+    )
+    with caplog.at_level("WARNING", logger="roleplay_slim"):
+        create_app(config, transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+    assert any("ROLEPLAY_SLIM_TEST_DEFINITELY_UNSET_KEY" in r.message for r in caplog.records)
+
+
+def test_no_warning_when_upstream_key_is_configured(caplog, monkeypatch):
+    monkeypatch.setenv("ROLEPLAY_SLIM_TEST_KEY_IS_SET", "sk-something")
+    config = ProxyConfig(
+        compressor=CompressorConfig(),
+        upstream_api_key_env="ROLEPLAY_SLIM_TEST_KEY_IS_SET",
+    )
+    with caplog.at_level("WARNING", logger="roleplay_slim"):
+        create_app(config, transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+    assert not any("not set" in r.message for r in caplog.records)
+
+
 def test_chat_completions_logs_a_readable_compression_summary(caplog):
     """The proxy is typically run in a foreground terminal — a readable
     per-request log line (not just the /stats JSON endpoint) is how most
