@@ -1,7 +1,7 @@
 # roleplay-slim
 
 A lightweight context optimization layer for persistent AI characters —
-a library and an OpenAI-compatible proxy that knows the difference between a
+a library and an OpenAI Chat Completions-compatible proxy that knows the difference between a
 **cache-stable persona prefix** and the **dialogue history you pay for on
 every request**.
 

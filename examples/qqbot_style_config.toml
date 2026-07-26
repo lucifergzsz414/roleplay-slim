@@ -12,9 +12,10 @@ host = "127.0.0.1"
 port = 8791
 
 [compressor]
-# Keep the last 3 turns (a "turn" = one user message + the reply that
-# answered it) completely verbatim — recent nuance matters most.
-keep_recent_turns = 3
+# Keep the last 6 turns (a "turn" = one user message + the reply that
+# answered it) completely verbatim. Roleplay apps benefit from more
+# recent-context headroom than a typical customer-service bot needs.
+keep_recent_turns = 6
 
 enable_whitespace_normalize = true
 enable_dedupe_verbatim_tail = true

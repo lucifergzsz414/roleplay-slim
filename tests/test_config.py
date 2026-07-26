@@ -5,7 +5,7 @@ from roleplay_slim.config import CompressorConfig, ProxyConfig, STAGE_DIRECTION_
 
 def test_default_config_constructs_without_error():
     config = CompressorConfig()
-    assert config.keep_recent_turns == 3
+    assert config.keep_recent_turns == 6
 
 
 def test_negative_keep_recent_turns_rejected():

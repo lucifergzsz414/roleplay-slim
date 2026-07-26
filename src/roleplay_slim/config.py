@@ -42,7 +42,7 @@ class CompressorConfig:
     # How many of the most recent user/assistant turn-pairs are left
     # completely untouched. Everything older than this window is a
     # candidate for history_window / strip_stage_directions.
-    keep_recent_turns: int = 3
+    keep_recent_turns: int = 6
 
     # Master switches for each strategy. whitespace_normalize and
     # dedupe_verbatim_tail are cheap and safe, so they default on.
