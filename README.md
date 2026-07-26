@@ -74,6 +74,28 @@ semantic scoring)
 | `history_window` | Keeps the most recent N turns verbatim; older turns get dropped or trimmed to a first+last-sentence stub | on |
 | `strip_stage_directions` | Removes parenthetical/action-description text (`（…）`, `*…*`, whatever your app uses) from *older* turns only, keeping actual dialogue intact — the differentiator | off (format-sensitive, opt-in) |
 
+## Benchmarks
+
+Numbers from `benchmark/run_benchmark.py` — a 55-turn synthetic roleplay
+conversation (167 messages, 2-message cache-stable prefix, ~4300 tokens
+before compression). Real-world savings depend on message length,
+turn count, and how much stage-direction text your app embeds; this is
+just a controlled baseline.
+
+| Config | Before | After | Saved | % |
+|---|---|---|---|---|
+| default (keep=6, trim) | 4299 | 3636 | 663 | 15.4% |
+| example_config.toml (keep=6, trim + strip) | 4299 | 2495 | 1804 | 42.0% |
+| aggressive (keep=3, trim + strip) | 4299 | 2441 | 1858 | 43.2% |
+| max (keep=3, drop + strip) | 4299 | 448 | 3851 | 89.6% |
+
+The safe default saves ~15% with zero config. Turning on
+`strip_stage_directions` (as the example config does) brings that to
+~42% for dialogue-heavy content. The "max" row shows how deep the
+compression ceiling is — ~90%, appropriate for apps that *already* run
+their own persistent-memory/fact-extraction layer before `compress()`
+ever sees the messages (in that case use `history_window_mode="drop"`).
+
 **Explicitly out of scope for v0.2** (see the plan doc if you're
 contributing): no LLMLingua-style ML-based semantic compression, no
 multi-provider wire-format translation (OpenAI format only — covers
