@@ -20,6 +20,26 @@ experience assumed.
 > 37,176 → 19,545 tokens (47.4% less). Persona prefix never touched.
 > [See the proof](#benchmarks) · [Try it in 30s](#30-second-tryout)
 
+## The problem
+
+```mermaid
+flowchart LR
+    subgraph WITHOUT["Without compression"]
+        direction TB
+        W1["100+ turns of chat"] --> W2["Context explosion"]
+        W2 --> W3["Token cost rising"]
+        W2 --> W4["Personality drift"]
+    end
+    subgraph WITH["With roleplay-slim"]
+        direction TB
+        S1["Persona — cached forever"] --> S3["Cache hits every request"]
+        S2["History — compressed"] --> S4["~47% fewer tokens"]
+        S3 --> S5["Character stays the same"]
+        S4 --> S5
+    end
+    WITHOUT -.->|"same conversation"| WITH
+```
+
 ## What it does
 
 | | |

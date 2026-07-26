@@ -16,6 +16,26 @@
 > **500 轮角色扮演对话** — 37,176 → 19,545 tokens（省 47.4%），
 > persona 前缀 100% 保留。[见性能测试](#性能测试) · [30 秒上手](#30-秒上手)
 
+## 问题
+
+```mermaid
+flowchart LR
+    subgraph WITHOUT["不压缩"]
+        direction TB
+        W1["100+ 轮对话"] --> W2["上下文爆炸"]
+        W2 --> W3["Token 成本上涨"]
+        W2 --> W4["人格逐渐漂移"]
+    end
+    subgraph WITH["用 roleplay-slim"]
+        direction TB
+        S1["Persona — 永久缓存"] --> S3["每次命中缓存"]
+        S2["对话历史 — 智能压缩"] --> S4["省 ~47% token"]
+        S3 --> S5["角色始终保持一致"]
+        S4 --> S5
+    end
+    WITHOUT -.->|"同一段对话"| WITH
+```
+
 ## 它做什么
 
 | | |
