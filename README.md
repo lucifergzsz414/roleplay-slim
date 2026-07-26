@@ -5,14 +5,29 @@ a library and an OpenAI Chat Completions-compatible proxy that knows the differe
 **cache-stable persona prefix** and the **dialogue history you pay for on
 every request**.
 
+[![CI](https://github.com/lucifergzsz414/roleplay-slim/actions/workflows/ci.yml/badge.svg)](https://github.com/lucifergzsz414/roleplay-slim/actions)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 New to this and just want it running? See
 [QUICKSTART.md](QUICKSTART.md) ([中文版](QUICKSTART_CN.md)) — no prior
 experience assumed.
 
+## What it does
+
+| | |
+|---|---|
+| **Library** | `compress(messages)` — import it in your own Python app |
+| **Proxy** | Drop-in `base_url` swap, zero code changes — runs on `127.0.0.1:8791` |
+| **Cache-aware** | Auto-detects the cache-stable prefix and leaves it byte-for-byte untouched |
+| **Dialogue-native** | Built for prose, not JSON — stage-direction stripping, recurring-footer dedup, per-turn trimming |
+
+---
+
 ## Why this exists
 
 There's already a handful of LLM context-compression proxies on GitHub —
-[headroom](https://github.com/chopratejas/headroom),
+[headroom](https://github.com/headroomlabs-ai/headroom),
 [kompact](https://github.com/npow/kompact),
 [KrunchWrapper](https://github.com/naemlucifer/KrunchWrapper), and others.
 They're good at what they target: JSON blobs, tool output, logs, code.
@@ -26,6 +41,8 @@ actually sends. Squeezing that content the same way a generic compressor
 squeezes JSON risks losing the tone, phrasing, and emotional nuance that
 *is* the product. roleplay-slim is built specifically for that content
 instead.
+
+---
 
 ## The core idea
 
@@ -64,6 +81,8 @@ placeholders. roleplay-slim instead identifies the prefix *before* any
 strategy runs and simply never touches it — no reconstruction needed
 because nothing was changed in the first place.
 
+---
+
 ## What it compresses (v0.2, all rule-based — no ML model, no lossy
 semantic scoring)
 
@@ -96,11 +115,36 @@ compression ceiling is — ~90%, appropriate for apps that *already* run
 their own persistent-memory/fact-extraction layer before `compress()`
 ever sees the messages (in that case use `history_window_mode="drop"`).
 
+## When to use / when to skip
+
+| Use roleplay-slim if you… | Skip it if you… |
+|---|---|
+| Run a character/roleplay bot with long chat history | Only make single-turn requests (no history to compress) |
+| Already pay for token-based LLM pricing per request | Are on a flat-rate or unlimited-token plan |
+| Have a fixed persona/config prefix you want to cache | Have no cache-stable prefix at all |
+| Send dialogue-heavy content (prose, not JSON) | Primarily send structured data / JSON / tool output |
+| Want a drop-in proxy with zero code changes | Need MCP, multi-provider format translation, or a GUI |
+
+## How it compares to alternatives
+
+| | roleplay-slim | [headroom](https://github.com/headroomlabs-ai/headroom) | [kompact](https://github.com/npow/kompact) | [KrunchWrapper](https://github.com/naemlucifer/KrunchWrapper) |
+|---|---|---|---|---|
+| **Built for** | Prose dialogue | Agent tool output, JSON, code | Multi-step agentic traces | General text |
+| **Prefix cache-safe** | ✅ Byte-for-byte guarantee | ✅ CacheAligner (reconstructs) | ⚠️ Restores after compression | ❌ No concept of prefix |
+| **Dialogue-aware** | ✅ Stage directions, footers | ❌ Generic text only | ❌ Generic text only | ❌ Generic text only |
+| **Depends on ML** | No (pure rules) | Yes (Kompress-v2-base) | No (heuristics) | No (heuristics) |
+| **Proxy mode** | ✅ OpenAI Chat Completions | ✅ OpenAI + Anthropic | ✅ OpenAI | ✅ OpenAI |
+| **MCP server** | ❌ | ✅ | ❌ | ❌ |
+| **Reversible** | ❌ (lossy trim/strip) | ✅ (CCR) | ❌ | ❌ |
+| **Install size** | < 5 MB | 500+ MB (ONNX + model) | < 10 MB | < 5 MB |
+
 **Explicitly out of scope for v0.2** (see the plan doc if you're
 contributing): no LLMLingua-style ML-based semantic compression, no
 multi-provider wire-format translation (OpenAI format only — covers
 DeepSeek and most others), no cross-request semantic cache/vector store,
 no GUI.
+
+---
 
 ### `history_window`'s trim mode assumes you have (or don't need) memory elsewhere
 
@@ -156,6 +200,8 @@ strategy only ever touches string content — a list is passed through
 byte-for-byte unmodified rather than guessed at. Token estimates only
 count the text parts of a multimodal message; image cost isn't modeled.
 
+---
+
 ## Testing
 
 Hand-picked fixtures alone missed a real bug (a recurring instruction could
@@ -167,6 +213,8 @@ turn count, and which system messages repeat across turns) and checks
 invariants that must hold for *any* input — the prefix survives unchanged,
 a recurring instruction never vanishes entirely, output stays well-formed.
 Run `pytest` to execute both.
+
+---
 
 ## Install
 
@@ -180,6 +228,8 @@ pip install "roleplay-slim[all]"       # proxy + accurate tiktoken-based stats, 
 extra names to get everything working; the full dependency closure is under
 5 MB (verified — nowhere near the ML-heavy `[proxy]` extras some other tools
 in this space pull in).
+
+---
 
 ## Use as a library
 
@@ -246,6 +296,8 @@ Errors and non-2xx responses from the real upstream provider (rate limits,
 auth failures, timeouts) are passed through with their real status code and
 body — both for regular and streaming requests — rather than silently
 turning into an unhandled exception or a misleading 200.
+
+---
 
 ## API coverage
 
