@@ -1,6 +1,6 @@
 import pytest
 
-from roleplay_slim.config import CompressorConfig, STAGE_DIRECTION_PRESETS
+from roleplay_slim.config import CompressorConfig, ProxyConfig, STAGE_DIRECTION_PRESETS
 
 
 def test_default_config_constructs_without_error():
@@ -67,3 +67,35 @@ def test_prefix_timestamp_bucket_minutes_zero_rejected():
 def test_prefix_timestamp_bucket_minutes_over_60_rejected():
     with pytest.raises(ValueError, match="prefix_timestamp_bucket_minutes"):
         CompressorConfig(prefix_timestamp_bucket_minutes=61)
+
+
+def test_from_dict_rejects_unknown_compressor_keys():
+    with pytest.raises(ValueError, match="unknown compressor config key"):
+        CompressorConfig.from_dict({"compressor": {"keep_recent_turns": 3, "typoed_key": True}})
+
+
+def test_from_dict_accepts_known_compressor_keys():
+    config = CompressorConfig.from_dict({"compressor": {"keep_recent_turns": 5}})
+    assert config.keep_recent_turns == 5
+
+
+def test_proxy_from_toml_rejects_unknown_proxy_keys(tmp_path):
+    toml_path = tmp_path / "test.toml"
+    toml_path.write_text(
+        "[proxy]\nupstream_base_url = 'https://example.com/v1'\nclient_auth_token_en = 'TOKEN'\n\n"
+        "[compressor]\nkeep_recent_turns = 3\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown proxy config key"):
+        ProxyConfig.from_toml(str(toml_path))
+
+
+def test_proxy_from_toml_rejects_unknown_compressor_keys(tmp_path):
+    toml_path = tmp_path / "test.toml"
+    toml_path.write_text(
+        "[proxy]\nupstream_base_url = 'https://example.com/v1'\n\n"
+        "[compressor]\nkeep_recent_turns = 3\nunknown_field = 42\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown compressor config key"):
+        ProxyConfig.from_toml(str(toml_path))

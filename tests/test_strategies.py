@@ -1,6 +1,7 @@
-from roleplay_slim.config import CompressorConfig
+from roleplay_slim.config import STAGE_DIRECTION_PRESETS, CompressorConfig
 from roleplay_slim.segmenter import Turn
 from roleplay_slim.strategies import (
+    _extractive_trim,
     dedupe_verbatim_tail,
     history_window,
     normalize_prefix_timestamps,
@@ -178,3 +179,42 @@ def test_strip_stage_directions_removes_parens_from_old_turns_only():
     assert "第一句台词" in result[0].messages[0]["content"]
     # the most recent turn (last one) is left fully alone
     assert result[1].messages[0]["content"] == "（微笑）最近这句台词"
+
+
+def test_extractive_trim_never_returns_longer_than_input():
+    """A very short message where the connector "……" plus two short
+    sentences already exceeds the original length must be returned
+    unchanged — trim must not make things worse."""
+    # 6 chars: "a.b.c." → sentences ["a", "b", "c"] → "a …… c" = 7 chars
+    short = "a.b.c."
+    assert _extractive_trim(short) == short
+    # 2 sentences: no trimming needed
+    assert _extractive_trim("hello. world.") == "hello. world."
+
+
+def test_extractive_trim_still_trims_when_beneficial():
+    long_text = "第一句很长很长的话。第二句无关紧要的话。第三句也很长很长的话。"
+    result = _extractive_trim(long_text)
+    assert len(result) < len(long_text)
+    assert "第一句" in result
+    assert "第三句" in result
+
+
+def test_asterisk_preset_does_not_match_double_asterisks():
+    """The asterisk preset must not match markdown **bold** or
+    ***bold-italic*** — otherwise legitimate formatting gets silently
+    stripped."""
+    pattern = STAGE_DIRECTION_PRESETS["asterisk"]
+    import re
+    rx = re.compile(pattern)
+
+    # Must match: single-asterisk stage direction
+    assert rx.search("*waves*") is not None
+    assert rx.search("hello *smiles* there") is not None
+
+    # Must NOT match: double-asterisk bold
+    assert rx.search("**important**") is None, "asterisk preset matched **bold**"
+    # Must NOT match: triple-asterisk bold-italic
+    assert rx.search("***really***") is None, "asterisk preset matched ***bold-italic***"
+    # Must NOT match: single asterisk with nothing inside
+    assert rx.search("**") is None

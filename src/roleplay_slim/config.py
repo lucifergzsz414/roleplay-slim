@@ -25,7 +25,12 @@ else:
 STAGE_DIRECTION_PRESETS: dict[str, str] = {
     "fullwidth_parens": r"（[^）]*）",  # （挥手）— the xiaomu bot's convention
     "halfwidth_parens": r"\([^)]*\)",  # (waves)
-    "asterisk": r"\*[^*]*\*",  # *waves*
+    "asterisk": r"(?<!\*)\*[^*]+\*(?!\*)",  # *waves* — uses lookaround to
+    # avoid matching **bold** or ***bold-italic*** (markdown emphasis).
+    # Note: will still match *italic* single-asterisk emphasis — if your
+    # app uses markdown formatting in dialogue, prefer a distinct convention
+    # for stage directions ("fullwidth_parens" / "halfwidth_parens" /
+    # "square_bracket") and avoid this preset.
     "square_bracket": r"\[[^\]]*\]",  # [waves] — careful: matches format-tag
     # brackets like [信任:+0] too if you use those; prefer a distinct
     # convention for stage directions if your app also uses bracket tags.
@@ -126,6 +131,12 @@ class CompressorConfig:
         section = data.get("compressor", data)
         known = {f.name for f in cls.__dataclass_fields__.values()}
         kwargs = {k: v for k, v in section.items() if k in known}
+        unknown = set(section) - known
+        if unknown:
+            raise ValueError(
+                f"unknown compressor config key(s): {sorted(unknown)}. "
+                f"Known keys: {sorted(known)}"
+            )
         return cls(**kwargs)
 
 
@@ -154,5 +165,11 @@ class ProxyConfig:
         proxy_section = data.get("proxy", {})
         compressor = CompressorConfig.from_dict(data)
         known = {"upstream_base_url", "upstream_api_key_env", "host", "port", "client_auth_token_env"}
+        unknown = set(proxy_section) - known
+        if unknown:
+            raise ValueError(
+                f"unknown proxy config key(s) in [{path}]: {sorted(unknown)}. "
+                f"Known keys: {sorted(known)}"
+            )
         kwargs = {k: v for k, v in proxy_section.items() if k in known}
         return cls(compressor=compressor, **kwargs)

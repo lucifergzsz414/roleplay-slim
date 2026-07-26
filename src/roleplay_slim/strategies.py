@@ -101,11 +101,15 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？…\.\!\?])\s*")
 
 def _extractive_trim(text: str) -> str:
     """Keep the first and last sentence, drop the middle — a cheap
-    fallback for apps with no memory/summary layer of their own."""
+    fallback for apps with no memory/summary layer of their own.
+    Never returns a string *longer* than the input — a very short message
+    (where the connector "……" plus the two sentences already exceeds the
+    original length) is returned unchanged."""
     sentences = [s for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
     if len(sentences) <= 2:
         return text
-    return sentences[0] + " …… " + sentences[-1]
+    trimmed = sentences[0] + " …… " + sentences[-1]
+    return trimmed if len(trimmed) < len(text) else text
 
 
 def history_window(turns: list[Turn], config: CompressorConfig) -> list[Turn]:

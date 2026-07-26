@@ -20,23 +20,31 @@ def _turns_to_messages(turns: list[Turn]) -> list[dict]:
     return out
 
 
-def _find_recurring_system_texts(turns: list[Turn]) -> dict[str, object]:
-    """System/developer-message content that appears in 2+ of the original
-    turns reads as a recurring per-request instruction (a footer/format
-    reminder), not a one-off note — it must not be silently lost even if
-    every turn that happened to carry a copy gets pruned away. Keyed by
-    content_key() rather than the raw content since content can be a list
-    (OpenAI-style multimodal parts), which isn't hashable."""
+def _find_recurring_system_texts(turns: list[Turn]) -> dict[str, dict]:
+    """System/developer messages whose content appears in 2+ of the
+    original turns read as a recurring per-request instruction (a
+    footer/format reminder), not a one-off note — they must not be
+    silently lost even if every turn that happened to carry a copy gets
+    pruned away.
+
+    The *last* occurrence of each distinct content is stored in full
+    (preserving name, cache_control, and any other provider-specific
+    metadata), not just the content string — the re-attached copy should
+    be a faithful restoration of the original message, not a bare
+    ``{"role": "system", "content": "..."}`` skeleton.
+
+    Keyed by content_key() rather than the raw content since content can
+    be a list (OpenAI-style multimodal parts), which isn't hashable."""
     counts: dict[str, int] = {}
-    values: dict[str, object] = {}
+    last_occurrence: dict[str, dict] = {}
     for turn in turns:
         for m in turn.messages:
             if m.get("role") in ("system", "developer"):
                 content = m.get("content", "")
                 key = content_key(content)
                 counts[key] = counts.get(key, 0) + 1
-                values[key] = content
-    return {key: values[key] for key, n in counts.items() if n >= 2}
+                last_occurrence[key] = dict(m)
+    return {key: last_occurrence[key] for key, n in counts.items() if n >= 2}
 
 
 def compress(messages: list[dict], config: CompressorConfig | None = None) -> list[dict]:
@@ -95,9 +103,9 @@ def compress(messages: list[dict], config: CompressorConfig | None = None) -> li
     dynamic = _turns_to_messages(turns)
 
     surviving_keys = {content_key(m.get("content", "")) for m in dynamic if m.get("role") in ("system", "developer")}
-    for key, content in recurring_system_texts.items():
+    for key, msg in recurring_system_texts.items():
         if key not in surviving_keys:
-            dynamic.append({"role": "system", "content": content})
+            dynamic.append(dict(msg))
 
     if config.enable_whitespace_normalize:
         dynamic = [

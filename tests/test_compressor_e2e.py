@@ -238,3 +238,30 @@ def test_tool_call_chain_survives_compression():
         assistant_replies = [m for m in result if m["role"] == "assistant" and isinstance(m.get("content"), str)]
         assert any("3+5 equals 8" in m["content"] for m in assistant_replies), \
             "tool-chain final reply was lost"
+
+
+def test_recurring_footer_preserves_extra_fields():
+    """When a recurring system/developer message carries extra fields
+    (name, cache_control, etc.), the re-attached copy must preserve them
+    — not flatten to a bare {role, content} skeleton."""
+    footer_with_meta = {
+        "role": "system",
+        "name": "reply_format",
+        "content": "[FORMAT] end with a tag",
+        "cache_control": {"type": "ephemeral"},
+    }
+    messages = [{"role": "system", "content": "persona"}]
+    for i in range(3):
+        messages.append({"role": "user", "content": f"q{i}"})
+        messages.append({"role": "assistant", "content": f"a{i}"})
+        messages.append(dict(footer_with_meta))
+    messages.append({"role": "user", "content": "final question"})
+
+    config = CompressorConfig(keep_recent_turns=1, history_window_mode="drop")
+    result = compress(messages, config)
+
+    # The footer must survive exactly once, with its extra fields intact
+    footers = [m for m in result if m.get("content") == footer_with_meta["content"]]
+    assert len(footers) == 1
+    assert footers[0].get("name") == "reply_format"
+    assert footers[0].get("cache_control") == {"type": "ephemeral"}
