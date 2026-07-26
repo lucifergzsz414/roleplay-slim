@@ -12,7 +12,7 @@ every request**.
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-New to this and just want it running? See
+[中文版](README_CN.md) · New to this and just want it running? See
 [QUICKSTART.md](QUICKSTART.md) ([中文版](QUICKSTART_CN.md)) — no prior
 experience assumed.
 
