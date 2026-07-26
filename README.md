@@ -63,7 +63,7 @@ placeholders. roleplay-slim instead identifies the prefix *before* any
 strategy runs and simply never touches it — no reconstruction needed
 because nothing was changed in the first place.
 
-## What it compresses (v0.1, all rule-based — no ML model, no lossy
+## What it compresses (v0.2, all rule-based — no ML model, no lossy
 semantic scoring)
 
 | Strategy | What it does | Default |
@@ -73,7 +73,7 @@ semantic scoring)
 | `history_window` | Keeps the most recent N turns verbatim; older turns get dropped or trimmed to a first+last-sentence stub | on |
 | `strip_stage_directions` | Removes parenthetical/action-description text (`（…）`, `*…*`, whatever your app uses) from *older* turns only, keeping actual dialogue intact — the differentiator | off (format-sensitive, opt-in) |
 
-**Explicitly out of scope for v0.1** (see the plan doc if you're
+**Explicitly out of scope for v0.2** (see the plan doc if you're
 contributing): no LLMLingua-style ML-based semantic compression, no
 multi-provider wire-format translation (OpenAI format only — covers
 DeepSeek and most others), no cross-request semantic cache/vector store,
@@ -89,7 +89,7 @@ message about the weather) can end up in the dropped middle section.
 This is a deliberate scope boundary, not an oversight: roleplay-slim is a
 token compressor, not a memory system, and it has no way to know which
 sentence in your app's specific domain is the important one without either
-an LLM call (which the v0.1 rule-based boundary above rules out) or a
+an LLM call (which the v0.2 rule-based boundary above rules out) or a
 fragile keyword heuristic (high false-negative rate, especially outside
 English). If your app doesn't have its own long-term memory/fact-extraction
 layer sitting *before* compression runs, either:
@@ -226,7 +226,7 @@ turning into an unhandled exception or a misleading 200.
 
 ## Status
 
-v0.1 — built and dogfooded against one production roleplay bot's traffic.
+v0.2 — built and dogfooded against one production roleplay bot's traffic.
 Contributions welcome, especially additional `stage_direction_pattern`
 presets for other apps' conventions.
 

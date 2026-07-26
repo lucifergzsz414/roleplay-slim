@@ -8,87 +8,118 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ## [Unreleased]
 
+(Nothing yet.)
+
+## [0.2.0] — 2026-07-26
+
 ### Added
+
 - `client_auth_token_env` (off by default): an optional shared-secret check that gates
   access to the proxy itself, separate from the real upstream provider key. Without it,
   anyone who can reach the proxy's `host:port` can spend your configured upstream API key
   on their behalf — fine for `127.0.0.1`-only use, not fine once the proxy is reachable
-  from anywhere else. Flagged in an external code review; verified against a real running
-  proxy that missing/wrong tokens get a proxy-level 401 and the configured token never
-  leaks to the upstream request.
+  from anywhere else. Token comparison uses `secrets.compare_digest` (timing-safe).
 - `[all]` extra (`pip install "roleplay-slim[all]"`) — a single install command combining
-  `[proxy,tokens]` so new users don't need to know the individual extra names. Verified via
-  `pip download` that the full dependency closure is under 5 MB, versus 11+ MB for Kompact
-  (which bundles a full OpenTelemetry stack) and considerably more for headroom-ai's `[proxy]`
-  extra (onnxruntime, transformers, magika, among others).
-- `CompressorConfig` now validates its fields on construction (`keep_recent_turns`,
-  `history_window_mode`, `prefix_override`, `stage_direction_pattern`) and raises
-  `ValueError` with a specific, actionable message instead of failing confusingly
-  later during compression.
+  `[proxy,tokens]` so new users don't need to know the individual extra names.
 - `STAGE_DIRECTION_PRESETS`: named regex presets (`fullwidth_parens`, `halfwidth_parens`,
   `asterisk`, `square_bracket`) for `stage_direction_pattern`, so most apps don't need
   to write their own regex.
 - `py.typed` marker — the package now advertises inline type hints to type checkers.
 - `enable_prefix_normalize` / `prefix_timestamp_bucket_minutes` (off by default): an opt-in
   escape hatch for apps whose prefix embeds a live timestamp, which otherwise defeats the
-  provider's cache on every request regardless of anything else this library does. Rounds
-  ISO-8601 timestamps in the prefix down to a bucket boundary instead of leaving them exact
-  — deliberately not a placeholder-style replacement (unlike Kompact's Cache Aligner), since
-  a roleplay persona often genuinely needs approximate time-of-day information. Added after
-  actually reading Kompact's `cache_aligner.py` source to verify how it differs (see below).
+  provider's cache on every request. Rounds ISO-8601 timestamps in the prefix down to a
+  bucket boundary instead of leaving them exact.
 - The proxy now prints a one-line, human-readable summary for every request
-  (`[roleplay-slim] request #1 | 1204 -> 891 tokens (saved 313, 26.0%)`) to whatever
-  terminal it's running in, instead of requiring a `/stats` poll to see anything is
-  happening. Scoped to roleplay-slim's own logger (not the root logger) so it doesn't
-  leak its prefix onto httpx's or uvicorn's own log lines.
-- `QUICKSTART.md` / `QUICKSTART_CN.md`: a from-zero setup guide (English + Chinese)
-  assuming no prior experience with Python packaging, environment variables, or this
-  project's own concepts — separate from the README, which assumes more context.
+  (`[roleplay-slim] request #1 | 1204 -> 891 tokens (saved 313, 26.0%)`).
+- `QUICKSTART.md` / `QUICKSTART_CN.md`: a from-zero setup guide (English + Chinese).
+- The proxy now logs a clear warning at startup if no upstream API key is configured.
+- **Hop-by-hop header filtering** (RFC 2616 §13.5.1): proxy now strips `Connection`,
+  `Transfer-Encoding`, `Keep-Alive`, `Upgrade`, `Proxy-Authenticate`,
+  `Proxy-Authorization`, `TE`, and `Trailers` from both request and response forwarding,
+  instead of only stripping two headers.
+- **Raw response pass-through**: non-JSON upstream responses (e.g. CDN/gateway HTML error
+  pages) are now passed through via `Response(content=...)` instead of crashing the proxy
+  with a `JSONDecodeError`.
+- **Request body validation**: the proxy now returns a clear `400` for common caller
+  mistakes (body isn't valid JSON, body isn't a dict, `messages` isn't an array, message
+  elements aren't dicts) rather than failing confusingly later.
+- **Request header and query-string forwarding**: the proxy now forwards client-provided
+  HTTP headers and query parameters to the upstream provider, so custom headers (e.g.
+  `X-Custom-Provider-Param`) and query flags are no longer silently dropped.
+- `CompressorConfig` now validates all fields on construction (`keep_recent_turns`,
+  `history_window_mode`, `prefix_override`, `stage_direction_pattern`) and raises
+  `ValueError` with a specific, actionable message.
+- **Strict config validation**: `CompressorConfig.from_dict` and `ProxyConfig.from_toml`
+  now raise `ValueError` on unknown keys, so a typo like `client_auth_token_en` doesn't
+  silently disable proxy access control without any warning.
 
-- The proxy now logs a clear warning at startup (not just a confusing 401 at the first
-  request) if no upstream API key is configured and no fallback env var is set.
+### Changed
+
+- **Prefix detection now includes `developer` role**: the auto-detected cache-stable
+  prefix treats leading `developer` messages the same as `system` (the
+  OpenAI-recommended replacement for `system` as of 2025), so they're left
+  byte-for-byte untouched.
+- **Asterisk preset regex improved**: changed from `r"\*[^*]*\*"` to
+  `r"(?<!\*)\*[^*]+\*(?!\*)"` so markdown `**bold**` and `***bold-italic***` are
+  no longer matched/stripped. Note: single-asterisk `*italic*` emphasis *will* still
+  match — apps using markdown in dialogue should prefer a distinct convention like
+  `fullwidth_parens`, `halfwidth_parens`, or `square_bracket`.
 
 ### Fixed
+
 - `compress()` no longer crashes on OpenAI-style multimodal `content` (a list of
   `{"type": "text"|"image_url", ...}` parts instead of a plain string). Every
   text-manipulation strategy now only touches string content; list content passes
-  through unmodified. Token estimation counts only the text parts.
+  through unmodified.
 - A system message that recurs across 2+ turns (e.g. a footer/format reminder) could
   be silently dropped entirely if every turn carrying a copy got pruned by
   `history_window`. `compress()` now snapshots recurring instructions before any
   pruning and re-attaches one copy if every copy is otherwise lost. Found via a live
-  DeepSeek A/B comparison where the compressed request's reply visibly skipped a
-  mandatory reply-format instruction the uncompressed request's reply followed.
+  DeepSeek A/B comparison.
+- **Recurring system messages now preserve extra fields** (`name`, `cache_control`, etc.)
+  when re-attached after compression — they were previously flattened to bare
+  `{role, content}` skeletons.
+- **`_extractive_trim` length guard**: very short messages where the "……" connector
+  plus two boundary sentences already exceeds the original length are now returned
+  unchanged instead of being "compressed" into a longer string.
 - The proxy reused a fresh `httpx.AsyncClient` per request instead of one shared client for
   the app's lifetime, discarding connection pooling on every single call. Fixed by moving
-  client creation into the app's `lifespan` (FastAPI's `on_event("shutdown")` is itself
-  deprecated, so this also modernized to the `lifespan` context-manager form).
+  client creation into the app's `lifespan`.
 - `ProxyConfig.from_toml()` opened and parsed the same config file twice — once directly,
   once via `CompressorConfig.from_toml(path)` internally. Now parsed once and shared.
 - `strip_stage_directions()` recompiled `stage_direction_pattern` on every call instead of
   once; `CompressorConfig.__post_init__` now compiles it once and caches the result.
 - Upstream connection failures (timeout, connection refused) previously crashed with an
   unhandled exception instead of a clean error response — both the regular and streaming
-  request paths now return a `502` with an error body on upstream failure. Streaming
-  requests also now propagate the real upstream status code and content-type instead of
-  always responding `200` regardless of what the upstream actually returned, and close the
-  upstream connection cleanly if the stream is interrupted partway through.
-- All four items above came out of an external code review (GLM + qwen3.7-max, run with a
-  strict format requiring specific file:line findings rather than a general summary) —
-  verified each against the actual source before fixing, ruled out one flagged issue as a
-  false positive from the reviewer prompt's own encoding mishap (not a real bug in the
-  shipped code), and end-to-end tested the connection-reuse and auth fixes against a real
-  running proxy talking to the real DeepSeek API rather than trusting unit tests alone.
+  request paths now return a `502` with an error body on upstream failure.
+- `history_window` trim mode now preserves `tool`-role messages unmodified (they're
+  structured data, often JSON — sentence-boundary trimming would corrupt them) and keeps
+  tool-call chains (assistant.tool_calls → tool → assistant) atomically intact.
 
 ### Testing
+
 - Added `tests/test_properties.py`: Hypothesis-based property tests generating a wide
-  range of message-array shapes (varying prefix length, turn count, recurring system
-  messages, multimodal content) and checking invariants that must hold for any input.
-- Added `tests/test_proxy.py`: proxy-layer tests using `httpx.MockTransport` in place
-  of the real upstream call, so compression call-through, header passthrough, and
-  streaming can be verified with zero network dependency and zero API cost.
-- Added `tests/test_config.py` for the new validation/preset behavior.
+  range of message-array shapes and checking invariants that must hold for any input.
+- Added `tests/test_proxy.py`: proxy-layer tests using `httpx.MockTransport` (10 new
+  tests covering validation, pass-through, header forwarding, hop-by-hop filtering).
+- Added `tests/test_config.py`: config validation/preset tests (4 new tests for strict
+  validation).
+- 2 new segmenter tests (developer prefix detection), 7 new strategy tests (tool
+  preservation, developer dedup, extractive trim guard, asterisk preset), 2 new E2E
+  tests (developer prefix, tool-call chain survival, recurring footer field preservation).
+- 86 tests total, all passing; mypy reports zero issues.
 - Added a GitHub Actions CI workflow running the full suite on Python 3.10/3.11/3.12.
+
+### Security
+
+- Token comparison uses `secrets.compare_digest` (constant-time) instead of string
+  equality for `client_auth_token_env` shared-secret validation.
+- Hop-by-hop headers are now comprehensively stripped per RFC 2616 §13.5.1 (was only
+  stripping `authorization` from responses — a subset of the required set).
+- Request body is validated early (before any upstream call) with clear 400 responses
+  for malformed input.
+- Strict config validation prevents typos in security-critical fields from silently
+  disabling access control.
 
 ## [0.1.0] — 2026-07-25
 
