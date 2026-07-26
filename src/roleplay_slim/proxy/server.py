@@ -128,7 +128,15 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                 status_code=400,
             )
 
-        compressed = compress(messages, config.compressor)
+        try:
+            compressed = compress(messages, config.compressor)
+        except Exception:
+            logger.exception("compression failed for request #%d", stats.request_count + 1)
+            return JSONResponse(
+                {"error": {"message": "internal error during compression"}},
+                status_code=500,
+            )
+
         entry = stats.record(messages, compressed)
         pct = (entry["saved"] / entry["tokens_before"] * 100) if entry["tokens_before"] else 0.0
         logger.info(

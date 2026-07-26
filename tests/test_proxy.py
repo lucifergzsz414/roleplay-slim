@@ -383,6 +383,27 @@ def test_query_params_are_forwarded_to_upstream():
     assert "customer_id=test-456" in captured["url"]
 
 
+def test_compression_crash_returns_500_with_openai_error_format(monkeypatch):
+    """If compress() itself throws an unexpected exception (not a validation
+    error — the input is well-formed — but a bug/data-dependent edge case),
+    the proxy must return a 500 with an OpenAI-shaped error body rather than
+    crashing with a bare unhandled-exception stack trace."""
+    import roleplay_slim.proxy.server as srv
+
+    def _blow_up(*_a, **_kw):
+        raise RuntimeError("simulated internal compressor bug")
+
+    monkeypatch.setattr(srv, "compress", _blow_up)
+
+    client = _make_client(lambda r: httpx.Response(200, json={}))
+    resp = client.post("/v1/chat/completions", json=_sample_body())
+    assert resp.status_code == 500
+    body = resp.json()
+    assert "error" in body
+    assert "message" in body["error"]
+    assert "compression" in body["error"]["message"]
+
+
 def test_hop_by_hop_request_headers_are_stripped():
     """Hop-by-hop headers (keep-alive, proxy-authorization, te, trailers,
     upgrade, etc.) belong to the proxy's own connection to its peer — they

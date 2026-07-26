@@ -1,8 +1,9 @@
 # roleplay-slim
 
-Dialogue/roleplay-aware LLM context compression — a library and an
-OpenAI-compatible proxy that knows the difference between a **cache-stable
-persona prefix** and the **dialogue history you pay for on every request**.
+A lightweight context optimization layer for persistent AI characters —
+a library and an OpenAI-compatible proxy that knows the difference between a
+**cache-stable persona prefix** and the **dialogue history you pay for on
+every request**.
 
 New to this and just want it running? See
 [QUICKSTART.md](QUICKSTART.md) ([中文版](QUICKSTART_CN.md)) — no prior
@@ -223,6 +224,20 @@ Errors and non-2xx responses from the real upstream provider (rate limits,
 auth failures, timeouts) are passed through with their real status code and
 body — both for regular and streaming requests — rather than silently
 turning into an unhandled exception or a misleading 200.
+
+## API coverage
+
+| | |
+|---|---|
+| ✅ `POST /v1/chat/completions` | Full support — both regular and streaming |
+| ✅ `system` / `user` / `assistant` roles | Full support |
+| ✅ Streaming (SSE) | Transparent pass-through |
+| ✅ OpenAI-compatible client libraries | Drop-in `base_url` swap |
+| ⚠️ `developer` role | Supported in compression, not yet tested against every provider's wire format |
+| ⚠️ Multimodal `content` (list of parts) | Passes through unmodified; token estimation counts text parts only |
+| ⚠️ Tool calls (`tool_calls` → `tool` → `assistant`) | Chains are preserved atomically, but the proxy itself doesn't execute tools |
+| ❌ `POST /v1/responses` | Not supported (Chat Completions only) |
+| ❌ Function execution | The proxy compresses messages; it doesn't run your tools |
 
 ## Status
 
