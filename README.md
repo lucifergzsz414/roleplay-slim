@@ -100,7 +100,7 @@ layer sitting *before* compression runs, either:
 - extract anything that must never be lost (promises, key facts, relationship
   state) into your own persistent store *before* calling `compress()` —
   `history_window_mode="drop"` is exactly the mode meant to pair with an app
-  that already does this (see `examples/qqbot_style_config.toml`'s comment).
+  that already does this (see `examples/example_config.toml`'s comment).
 
 ### If your own prefix isn't actually static
 
@@ -177,7 +177,7 @@ compressed_messages = compress(messages, config)
 
 ```bash
 export UPSTREAM_API_KEY=sk-...
-roleplay-slim-proxy --config examples/qqbot_style_config.toml
+roleplay-slim-proxy --config examples/example_config.toml
 ```
 
 Then point your app at `http://127.0.0.1:8791/v1` instead of the real
@@ -194,7 +194,7 @@ so you can see compression working without needing to poll `/stats`:
 `GET /stats` returns the same numbers as running totals, in JSON, if you
 want to pull them into your own monitoring instead.
 
-See `examples/qqbot_style_config.toml` for a config modeled on a real
+See `examples/example_config.toml` for a config modeled on a real
 production roleplay bot's message structure.
 
 ### Securing the proxy itself

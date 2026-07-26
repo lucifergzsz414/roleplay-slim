@@ -141,8 +141,8 @@ def test_recurring_footer_survives_even_when_every_copy_is_in_pruned_turns():
     still reproducing the missing footer). The actual fix: snapshot which
     system messages recur across 2+ turns *before* any pruning runs, and
     if every copy of a recurring text is gone after compression, re-attach
-    one copy at the end — mirroring how qqbot's own build_reply() appends
-    its footer fresh, as the final message, on every real call rather than
+    one copy at the end — mirroring how chat apps typically append
+    their footer fresh, as the final message, on every real call rather than
     relying on it surviving from stored history.
     """
     footer = "[FORMAT RULE] End every reply with a mood tag."
