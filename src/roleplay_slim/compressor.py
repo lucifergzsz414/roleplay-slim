@@ -87,8 +87,8 @@ def compress(messages: list[dict], config: CompressorConfig | None = None) -> li
     # history_window alone doesn't fix this (a recurring instruction can
     # legitimately live only in turns older than the keep window), so
     # instead: remember what recurs, and re-attach one copy at the end if
-    # every copy got pruned away — matching how qqbot's own build_reply()
-    # appends its footer fresh, as the last message, on every call.
+    # every copy got pruned away — mirroring how chat apps typically append
+    # their own footer fresh, as the last message, on every real call.
     recurring_system_texts = _find_recurring_system_texts(turns)
 
     if config.enable_history_window:

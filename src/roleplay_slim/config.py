@@ -23,7 +23,7 @@ else:
 # fixture used asterisks) plus a couple of other common ones. Pass either
 # a preset name (looked up here) or your own raw regex string.
 STAGE_DIRECTION_PRESETS: dict[str, str] = {
-    "fullwidth_parens": r"（[^）]*）",  # （挥手）— the xiaomu bot's convention
+    "fullwidth_parens": r"（[^）]*）",  # e.g. （挥手）— common in Chinese roleplay bots
     "halfwidth_parens": r"\([^)]*\)",  # (waves)
     "asterisk": r"(?<!\*)\*[^*]+\*(?!\*)",  # *waves* — uses lookaround to
     # avoid matching **bold** or ***bold-italic*** (markdown emphasis).
@@ -56,7 +56,7 @@ class CompressorConfig:
 
     # What happens to turns older than keep_recent_turns when
     # enable_history_window is on: "drop" removes them outright (appropriate
-    # for apps, like qqbot's own _retrieve_memory, that already inject a
+    # for apps that already inject a
     # separate persistent-memory summary elsewhere); "trim" keeps a short
     # extractive stub (first + last sentence) instead of dropping entirely.
     history_window_mode: str = "trim"  # "trim" | "drop"
