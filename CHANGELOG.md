@@ -9,6 +9,13 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 ## [Unreleased]
 
 ### Added
+- `client_auth_token_env` (off by default): an optional shared-secret check that gates
+  access to the proxy itself, separate from the real upstream provider key. Without it,
+  anyone who can reach the proxy's `host:port` can spend your configured upstream API key
+  on their behalf — fine for `127.0.0.1`-only use, not fine once the proxy is reachable
+  from anywhere else. Flagged in an external code review; verified against a real running
+  proxy that missing/wrong tokens get a proxy-level 401 and the configured token never
+  leaks to the upstream request.
 - `[all]` extra (`pip install "roleplay-slim[all]"`) — a single install command combining
   `[proxy,tokens]` so new users don't need to know the individual extra names. Verified via
   `pip download` that the full dependency closure is under 5 MB, versus 11+ MB for Kompact
@@ -52,6 +59,26 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
   pruning and re-attaches one copy if every copy is otherwise lost. Found via a live
   DeepSeek A/B comparison where the compressed request's reply visibly skipped a
   mandatory reply-format instruction the uncompressed request's reply followed.
+- The proxy reused a fresh `httpx.AsyncClient` per request instead of one shared client for
+  the app's lifetime, discarding connection pooling on every single call. Fixed by moving
+  client creation into the app's `lifespan` (FastAPI's `on_event("shutdown")` is itself
+  deprecated, so this also modernized to the `lifespan` context-manager form).
+- `ProxyConfig.from_toml()` opened and parsed the same config file twice — once directly,
+  once via `CompressorConfig.from_toml(path)` internally. Now parsed once and shared.
+- `strip_stage_directions()` recompiled `stage_direction_pattern` on every call instead of
+  once; `CompressorConfig.__post_init__` now compiles it once and caches the result.
+- Upstream connection failures (timeout, connection refused) previously crashed with an
+  unhandled exception instead of a clean error response — both the regular and streaming
+  request paths now return a `502` with an error body on upstream failure. Streaming
+  requests also now propagate the real upstream status code and content-type instead of
+  always responding `200` regardless of what the upstream actually returned, and close the
+  upstream connection cleanly if the stream is interrupted partway through.
+- All four items above came out of an external code review (GLM + qwen3.7-max, run with a
+  strict format requiring specific file:line findings rather than a general summary) —
+  verified each against the actual source before fixing, ruled out one flagged issue as a
+  false positive from the reviewer prompt's own encoding mishap (not a real bug in the
+  shipped code), and end-to-end tested the connection-reuse and auth fixes against a real
+  running proxy talking to the real DeepSeek API rather than trusting unit tests alone.
 
 ### Testing
 - Added `tests/test_properties.py`: Hypothesis-based property tests generating a wide

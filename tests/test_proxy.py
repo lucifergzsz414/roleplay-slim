@@ -31,8 +31,8 @@ def _sample_body(stream: bool = False) -> dict:
     return {"model": "test-model", "stream": stream, "messages": messages}
 
 
-def _make_client(handler) -> TestClient:
-    config = ProxyConfig(compressor=CompressorConfig(keep_recent_turns=1))
+def _make_client(handler, config: ProxyConfig | None = None) -> TestClient:
+    config = config or ProxyConfig(compressor=CompressorConfig(keep_recent_turns=1))
     app = create_app(config, transport=httpx.MockTransport(handler))
     # __enter__ (not just construction) is what actually runs the app's
     # lifespan, which is where the shared httpx.AsyncClient gets created —
@@ -152,3 +152,104 @@ def test_streaming_passthrough_is_not_corrupted():
         body = b"".join(resp.iter_bytes())
     assert b"[DONE]" in body
     assert b"delta" in body
+
+
+def test_streaming_propagates_real_upstream_error_status():
+    """A non-2xx upstream response for a streaming request must reach the
+    caller with the real status code, not a hardcoded 200 — the caller
+    can't otherwise tell a rate-limit or auth error from a real reply."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, content=b'{"error": "rate limited"}', headers={"content-type": "application/json"})
+
+    client = _make_client(handler)
+    with client.stream("POST", "/v1/chat/completions", json=_sample_body(stream=True)) as resp:
+        body = b"".join(resp.iter_bytes())
+    assert resp.status_code == 429
+    assert b"rate limited" in body
+
+
+def test_non_streaming_upstream_connection_failure_returns_502_not_a_crash():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = _make_client(handler)
+    resp = client.post("/v1/chat/completions", json=_sample_body())
+    assert resp.status_code == 502
+    assert "error" in resp.json()
+
+
+def test_streaming_upstream_connection_failure_returns_502_not_a_crash():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = _make_client(handler)
+    resp = client.post("/v1/chat/completions", json=_sample_body(stream=True))
+    assert resp.status_code == 502
+    assert "error" in resp.json()
+
+
+def test_client_auth_rejects_request_with_no_token_configured():
+    """client_auth_token_env set but the underlying env var empty should
+    fail closed (reject everyone) rather than fail open (accept anyone) —
+    an operator who set this expects protection, not a silent no-op."""
+    config = ProxyConfig(
+        compressor=CompressorConfig(),
+        client_auth_token_env="ROLEPLAY_SLIM_TEST_AUTH_TOKEN_UNSET",
+    )
+    client = _make_client(lambda r: httpx.Response(200, json={}), config=config)
+    resp = client.post(
+        "/v1/chat/completions",
+        json=_sample_body(),
+        headers={"Authorization": "Bearer anything"},
+    )
+    assert resp.status_code == 401
+
+
+def test_client_auth_rejects_wrong_token(monkeypatch):
+    monkeypatch.setenv("ROLEPLAY_SLIM_TEST_AUTH_TOKEN", "correct-secret")
+    config = ProxyConfig(
+        compressor=CompressorConfig(),
+        client_auth_token_env="ROLEPLAY_SLIM_TEST_AUTH_TOKEN",
+    )
+    client = _make_client(lambda r: httpx.Response(200, json={}), config=config)
+    resp = client.post(
+        "/v1/chat/completions",
+        json=_sample_body(),
+        headers={"Authorization": "Bearer wrong-secret"},
+    )
+    assert resp.status_code == 401
+
+
+def test_client_auth_accepts_correct_token_and_does_not_forward_it_upstream(monkeypatch):
+    monkeypatch.setenv("ROLEPLAY_SLIM_TEST_AUTH_TOKEN_2", "correct-secret")
+    monkeypatch.setenv("ROLEPLAY_SLIM_TEST_UPSTREAM_KEY", "sk-real-upstream-key")
+    config = ProxyConfig(
+        compressor=CompressorConfig(),
+        client_auth_token_env="ROLEPLAY_SLIM_TEST_AUTH_TOKEN_2",
+        upstream_api_key_env="ROLEPLAY_SLIM_TEST_UPSTREAM_KEY",
+    )
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json={"choices": []})
+
+    client = _make_client(handler, config=config)
+    resp = client.post(
+        "/v1/chat/completions",
+        json=_sample_body(),
+        headers={"Authorization": "Bearer correct-secret"},
+    )
+    assert resp.status_code == 200
+    # the proxy-access token must not leak upstream — the real upstream key
+    # (from ROLEPLAY_SLIM_TEST_UPSTREAM_KEY) is what should be sent instead
+    assert captured["auth"] == "Bearer sk-real-upstream-key"
+
+
+def test_no_client_auth_configured_is_backward_compatible():
+    """Default (client_auth_token_env="") behavior is completely unaffected
+    — no Authorization header required at all, matching every test above
+    this one in the file that never sets it."""
+    client = _make_client(lambda r: httpx.Response(200, json={"choices": []}))
+    resp = client.post("/v1/chat/completions", json=_sample_body())
+    assert resp.status_code == 200

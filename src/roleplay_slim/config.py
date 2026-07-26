@@ -137,12 +137,22 @@ class ProxyConfig:
     port: int = 8791
     compressor: CompressorConfig = field(default_factory=CompressorConfig)
 
+    # Off by default (empty string / unset env var = no access control, matching
+    # prior zero-config behavior). Set this to the name of an env var holding a
+    # shared secret to require every /v1/chat/completions caller to present it
+    # as `Authorization: Bearer <secret>` — otherwise anyone who can reach the
+    # proxy's host:port can make it spend your real upstream API key on their
+    # behalf. Distinct from upstream_api_key_env: that one is the *real*
+    # provider key this proxy sends upstream; this one is a separate secret
+    # that only gates access to the proxy itself and is never forwarded.
+    client_auth_token_env: str = ""
+
     @classmethod
     def from_toml(cls, path: str | Path) -> "ProxyConfig":
         with open(path, "rb") as f:
             data = tomllib.load(f)
         proxy_section = data.get("proxy", {})
         compressor = CompressorConfig.from_dict(data)
-        known = {"upstream_base_url", "upstream_api_key_env", "host", "port"}
+        known = {"upstream_base_url", "upstream_api_key_env", "host", "port", "client_auth_token_env"}
         kwargs = {k: v for k, v in proxy_section.items() if k in known}
         return cls(compressor=compressor, **kwargs)

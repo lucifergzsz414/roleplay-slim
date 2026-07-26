@@ -79,6 +79,28 @@ multi-provider wire-format translation (OpenAI format only — covers
 DeepSeek and most others), no cross-request semantic cache/vector store,
 no GUI.
 
+### `history_window`'s trim mode assumes you have (or don't need) memory elsewhere
+
+`trim` keeps a naive first+last-sentence stub of older turns — it has no
+concept of which sentence matters. A promise or commitment buried in the
+*middle* of an older message ("下次给你带一束花" in the middle of a longer
+message about the weather) can end up in the dropped middle section.
+
+This is a deliberate scope boundary, not an oversight: roleplay-slim is a
+token compressor, not a memory system, and it has no way to know which
+sentence in your app's specific domain is the important one without either
+an LLM call (which the v0.1 rule-based boundary above rules out) or a
+fragile keyword heuristic (high false-negative rate, especially outside
+English). If your app doesn't have its own long-term memory/fact-extraction
+layer sitting *before* compression runs, either:
+
+- switch to `history_window_mode="drop"` and rely on `keep_recent_turns`
+  alone (no partial-content risk, just a harder cutoff), or
+- extract anything that must never be lost (promises, key facts, relationship
+  state) into your own persistent store *before* calling `compress()` —
+  `history_window_mode="drop"` is exactly the mode meant to pair with an app
+  that already does this (see `examples/qqbot_style_config.toml`'s comment).
+
 ### If your own prefix isn't actually static
 
 The byte-for-byte guarantee above only helps if your prefix genuinely is
@@ -173,6 +195,34 @@ want to pull them into your own monitoring instead.
 
 See `examples/qqbot_style_config.toml` for a config modeled on a real
 production roleplay bot's message structure.
+
+### Securing the proxy itself
+
+By default anyone who can reach the proxy's `host:port` can use it — and
+since it holds your real upstream API key, that means they can spend your
+money. Fine for `127.0.0.1`-only local use; not fine if you ever bind it to
+`0.0.0.0` or put it behind a shared server. Set `client_auth_token_env` to
+the name of an environment variable holding a shared secret to require every
+caller to present it:
+
+```toml
+[proxy]
+client_auth_token_env = "PROXY_ACCESS_TOKEN"
+```
+
+```bash
+export PROXY_ACCESS_TOKEN=some-long-random-string
+```
+
+Callers then need `Authorization: Bearer some-long-random-string` — this is
+checked against the proxy itself, separately from (and never forwarded to)
+the real upstream provider, whose key stays configured via
+`upstream_api_key_env` as before.
+
+Errors and non-2xx responses from the real upstream provider (rate limits,
+auth failures, timeouts) are passed through with their real status code and
+body — both for regular and streaming requests — rather than silently
+turning into an unhandled exception or a misleading 200.
 
 ## Status
 
