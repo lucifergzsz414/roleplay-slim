@@ -16,8 +16,9 @@ every request**.
 [QUICKSTART.md](QUICKSTART.md) ([中文版](QUICKSTART_CN.md)) — no prior
 experience assumed.
 
-> **500-turn roleplay conversation** — 37,176 → 19,545 tokens (47.4% less),
-> persona prefix 100% preserved. [See benchmarks](#benchmarks) · [Try it in 30s](#30-second-tryout)
+> **500 turns later, the character still remembers who they are.**
+> 37,176 → 19,545 tokens (47.4% less). Persona prefix never touched.
+> [See the proof](#benchmarks) · [Try it in 30s](#30-second-tryout)
 
 ## What it does
 
