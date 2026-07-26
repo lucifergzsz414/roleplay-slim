@@ -28,17 +28,16 @@ experience assumed.
 ### How it fits into your stack
 
 ```mermaid
-flowchart LR
-    A[Your App] -->|messages| B
-    B -->|compressed| C[LLM Provider]
-    C -->|response| B
-    B -->|response| A
-
-    subgraph B[roleplay-slim proxy]
+flowchart TD
+    subgraph RS["roleplay-slim proxy :8791"]
         direction LR
-        P[Persona prefix<br/>untouched, cache-safe]
-        D[Dialogue history<br/>compressed]
+        P["Persona prefix — untouched, cache-safe"]
+        D["Dialogue history — compressed"]
     end
+    A[Your App] -->|"POST /v1/chat/completions"| RS
+    RS -->|"compressed messages"| C[LLM Provider]
+    C -->|"response"| RS
+    RS -->|"response (passthru)"| A
 ```
 
 ---
