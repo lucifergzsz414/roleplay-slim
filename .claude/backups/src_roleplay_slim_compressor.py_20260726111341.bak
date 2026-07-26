@@ -21,8 +21,8 @@ def _turns_to_messages(turns: list[Turn]) -> list[dict]:
 
 
 def _find_recurring_system_texts(turns: list[Turn]) -> dict[str, object]:
-    """System/developer-message content that appears in 2+ of the original
-    turns reads as a recurring per-request instruction (a footer/format
+    """System-message content that appears in 2+ of the original turns
+    reads as a recurring per-request instruction (a footer/format
     reminder), not a one-off note — it must not be silently lost even if
     every turn that happened to carry a copy gets pruned away. Keyed by
     content_key() rather than the raw content since content can be a list
@@ -31,7 +31,7 @@ def _find_recurring_system_texts(turns: list[Turn]) -> dict[str, object]:
     values: dict[str, object] = {}
     for turn in turns:
         for m in turn.messages:
-            if m.get("role") in ("system", "developer"):
+            if m.get("role") == "system":
                 content = m.get("content", "")
                 key = content_key(content)
                 counts[key] = counts.get(key, 0) + 1
@@ -94,7 +94,7 @@ def compress(messages: list[dict], config: CompressorConfig | None = None) -> li
 
     dynamic = _turns_to_messages(turns)
 
-    surviving_keys = {content_key(m.get("content", "")) for m in dynamic if m.get("role") in ("system", "developer")}
+    surviving_keys = {content_key(m.get("content", "")) for m in dynamic if m.get("role") == "system"}
     for key, content in recurring_system_texts.items():
         if key not in surviving_keys:
             dynamic.append({"role": "system", "content": content})

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "roleplay-slim"
-version = "0.2.0"
+version = "0.1.0"
 description = "Dialogue/roleplay-aware LLM context compression — a library and an OpenAI-compatible proxy that knows the difference between a cache-stable persona prefix and the dialogue history you pay for on every request."
 readme = "README.md"
 license = { text = "MIT" }

@@ -44,27 +44,6 @@ def test_split_into_turns_groups_by_user_message():
     assert [m["role"] for m in turns[1].messages] == ["user", "assistant"]
 
 
-def test_detect_prefix_length_includes_developer():
-    """developer is the official OpenAI replacement for system (2025) —
-    leading developer messages must also be treated as cache-stable prefix."""
-    messages = [
-        {"role": "developer", "content": "you are a helpful assistant"},
-        {"role": "system", "content": "shared config"},
-        {"role": "user", "content": "hi"},
-    ]
-    assert detect_prefix_length(messages) == 2
-
-
-def test_detect_prefix_length_mixed_system_and_developer():
-    messages = [
-        {"role": "system", "content": "a"},
-        {"role": "developer", "content": "b"},
-        {"role": "system", "content": "c"},
-        {"role": "user", "content": "hi"},
-    ]
-    assert detect_prefix_length(messages) == 3
-
-
 def test_segment_returns_prefix_unmodified_and_turns():
     messages = [
         {"role": "system", "content": "persona"},

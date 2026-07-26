@@ -1,37 +1,25 @@
 """OpenAI-compatible compression proxy.
 
-Sits between a chat app and its real LLM provider. The request's `messages`
-field is compressed via roleplay_slim.compress; the rest of the request body
-is forwarded as-is. Response bodies (JSON, HTML, plain text — whatever the
-upstream actually returns) pass through without being parsed and re-serialized
-so non-JSON error pages from CDNs and gateways don't cause a proxy-side 500.
+Sits between a chat app and its real LLM provider. Only the request's
+`messages` field is touched (via roleplay_slim.compress); everything else,
+including the response — streamed or not — passes through untouched.
 """
 from __future__ import annotations
 
 import logging
 import os
-import secrets
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..compressor import compress
 from ..config import ProxyConfig
 from ..stats import CompressionStats
 
 logger = logging.getLogger("roleplay_slim")
-
-# Headers that must never be forwarded, per RFC 2616 §13.5.1 — they belong
-# to a single hop (the proxy's own connection from/to its peer), not to the
-# end-to-end request/response.
-_HOP_BY_HOP_HEADERS = frozenset({
-    "host", "content-length", "connection", "transfer-encoding",
-    "keep-alive", "upgrade", "proxy-authenticate", "proxy-authorization",
-    "te", "trailers",
-})
 
 
 def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
@@ -89,9 +77,7 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
         # client_auth_token_env — zero-config deployments are unaffected.
         if config.client_auth_token_env:
             expected = f"Bearer {client_auth_token}" if client_auth_token else None
-            if not client_auth_token or not secrets.compare_digest(
-                incoming_auth or "", expected or ""
-            ):
+            if not client_auth_token or incoming_auth != expected:
                 return JSONResponse(
                     {"error": {"message": "invalid or missing proxy credentials"}},
                     status_code=401,
@@ -101,33 +87,8 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
             # own configured upstream key instead.
             incoming_auth = None
 
-        # Validate the request body before touching anything else — a
-        # malformed request should get a clear 400, not an internal 500
-        # from somewhere deep in the compression or upstream call.
-        try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse(
-                {"error": {"message": "request body must be valid JSON"}},
-                status_code=400,
-            )
-        if not isinstance(body, dict):
-            return JSONResponse(
-                {"error": {"message": "request body must be a JSON object"}},
-                status_code=400,
-            )
-        messages = body.get("messages")
-        if not isinstance(messages, list):
-            return JSONResponse(
-                {"error": {"message": "messages must be an array"}},
-                status_code=400,
-            )
-        if messages and not all(isinstance(m, dict) for m in messages):
-            return JSONResponse(
-                {"error": {"message": "every message must be an object"}},
-                status_code=400,
-            )
-
+        body = await request.json()
+        messages = body.get("messages", [])
         compressed = compress(messages, config.compressor)
         entry = stats.record(messages, compressed)
         pct = (entry["saved"] / entry["tokens_before"] * 100) if entry["tokens_before"] else 0.0
@@ -141,24 +102,10 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
         )
         body["messages"] = compressed
 
-        # Forward every request header that isn't hop-by-hop, then
-        # overwrite the two headers we control: Content-Type (always JSON
-        # for an OpenAI-compatible request) and Authorization (the real
-        # upstream key, unless the caller supplied their own).
-        headers = {
-            k: v for k, v in request.headers.items()
-            if k.lower() not in _HOP_BY_HOP_HEADERS
-        }
-        headers["content-type"] = "application/json"
-        headers["authorization"] = incoming_auth or (f"Bearer {api_key}" if api_key else "")
+        headers = {"Content-Type": "application/json"}
+        headers["Authorization"] = incoming_auth or (f"Bearer {api_key}" if api_key else "")
 
         upstream_url = f"{config.upstream_base_url.rstrip('/')}/chat/completions"
-        # Forward query-string parameters (e.g. ?customer_id=...) so the
-        # proxy is transparent to anything the caller appended to its URL.
-        qs = request.url.query
-        if qs:
-            upstream_url = f"{upstream_url}?{qs}"
-
         is_streaming = bool(body.get("stream"))
         client: httpx.AsyncClient = request.app.state.client
 
@@ -170,19 +117,7 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                 return JSONResponse(
                     {"error": {"message": f"upstream request failed: {e}"}}, status_code=502
                 )
-            # Pass through the raw upstream response — JSON, HTML error
-            # page, plain text, or empty body — rather than assuming JSON
-            # and crashing on the first CDN/gateway error page that isn't.
-            resp_headers = {
-                k: v for k, v in resp.headers.items()
-                if k.lower() not in _HOP_BY_HOP_HEADERS
-            }
-            return Response(
-                content=resp.content,
-                status_code=resp.status_code,
-                headers=resp_headers,
-                media_type=resp.headers.get("content-type"),
-            )
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
 
         # Open the upstream connection and read its status/headers before
         # committing to a StreamingResponse — once streaming has started,
@@ -207,14 +142,9 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
             finally:
                 await resp.aclose()
 
-        resp_headers = {
-            k: v for k, v in resp.headers.items()
-            if k.lower() not in _HOP_BY_HOP_HEADERS
-        }
         return StreamingResponse(
             stream_upstream(),
             status_code=resp.status_code,
-            headers=resp_headers,
             media_type=resp.headers.get("content-type", "text/event-stream"),
         )
 

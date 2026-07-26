@@ -20,18 +20,17 @@ Message = dict  # {"role": str, "content": str}
 def detect_prefix_length(messages: list[Message], override: int | None = None) -> int:
     """Return how many leading messages form the cache-stable prefix.
 
-    Default heuristic: every leading message with role == "system" or
-    "developer" (the latter is the official OpenAI replacement for "system"
-    as of 2025), up to (but not including) the first "user" or "assistant"
-    message. Most chat apps put their fixed persona/instructions here and
-    start the actual conversation afterward, so this needs no per-app
-    configuration to be useful out of the box.
+    Default heuristic: every leading message with role == "system", up to
+    (but not including) the first "user" or "assistant" message. Most chat
+    apps put their fixed persona/instructions here and start the actual
+    conversation afterward, so this needs no per-app configuration to be
+    useful out of the box.
     """
     if override is not None:
         return max(0, min(override, len(messages)))
     n = 0
     for m in messages:
-        if m.get("role") in ("system", "developer"):
+        if m.get("role") == "system":
             n += 1
         else:
             break

@@ -108,65 +108,6 @@ def test_history_window_noop_when_fewer_turns_than_keep_window():
     assert result == turns
 
 
-def test_history_window_trim_preserves_tool_messages():
-    """Tool-call result messages must survive trim mode — dropping them
-    would leave assistant.tool_calls without their corresponding results,
-    which many providers reject with a 400."""
-    turns = [
-        Turn([
-            {"role": "user", "content": "what is 2+2"},
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "calc", "arguments": "{}"}}]},
-            {"role": "tool", "tool_call_id": "c1", "content": "4"},
-            {"role": "assistant", "content": "2+2 equals 4"},
-        ]),
-        Turn([{"role": "user", "content": "recent"}, {"role": "assistant", "content": "ok"}]),
-    ]
-    config = CompressorConfig(keep_recent_turns=1, history_window_mode="trim")
-    result = history_window(turns, config)
-    assert len(result) == 2
-    old_roles = [m["role"] for m in result[0].messages]
-    assert "tool" in old_roles, f"tool message was dropped, got roles: {old_roles}"
-
-
-def test_history_window_trim_does_not_trim_tool_content():
-    """Tool results are structured data (often JSON) — sentence-boundary
-    trimming would corrupt them. They must pass through unmodified."""
-    tool_json = '{"result": 42, "confidence": 0.95}'
-    turns = [
-        Turn([
-            {"role": "user", "content": "compute"},
-            {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}]},
-            {"role": "tool", "tool_call_id": "c1", "content": tool_json},
-            {"role": "assistant", "content": "done"},
-        ]),
-        Turn([{"role": "user", "content": "recent"}, {"role": "assistant", "content": "ok"}]),
-    ]
-    config = CompressorConfig(keep_recent_turns=1, history_window_mode="trim")
-    result = history_window(turns, config)
-    tool_msgs = [m for m in result[0].messages if m["role"] == "tool"]
-    assert len(tool_msgs) == 1
-    assert tool_msgs[0]["content"] == tool_json
-
-
-def test_dedupe_verbatim_tail_handles_developer_messages():
-    turns = [
-        Turn([
-            {"role": "user", "content": "u1"},
-            {"role": "developer", "content": "FORMAT REMINDER"},
-        ]),
-        Turn([
-            {"role": "user", "content": "u2"},
-            {"role": "developer", "content": "FORMAT REMINDER"},
-        ]),
-    ]
-    result = dedupe_verbatim_tail(turns)
-    dev_count = sum(
-        1 for t in result for m in t.messages
-        if m.get("role") == "developer" and m.get("content") == "FORMAT REMINDER"
-    )
-    assert dev_count == 1
-
-
 def test_strip_stage_directions_removes_parens_from_old_turns_only():
     turns = [
         Turn([{"role": "user", "content": "（挥手）第一句台词"}]),

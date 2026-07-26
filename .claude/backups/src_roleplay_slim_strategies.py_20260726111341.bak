@@ -80,7 +80,7 @@ def dedupe_verbatim_tail(turns: list[Turn]) -> list[Turn]:
     for ti in range(len(turns) - 1, -1, -1):
         for mi in range(len(turns[ti].messages) - 1, -1, -1):
             m = turns[ti].messages[mi]
-            if m.get("role") not in ("system", "developer"):
+            if m.get("role") != "system":
                 continue
             key = content_key(m.get("content", ""))
             if key in seen_system_texts:
@@ -125,8 +125,7 @@ def history_window(turns: list[Turn], config: CompressorConfig) -> list[Turn]:
     for turn in old_turns:
         new_messages = []
         for m in turn.messages:
-            role = m.get("role")
-            if role in ("user", "assistant"):
+            if m.get("role") in ("user", "assistant"):
                 content = m.get("content", "")
                 # Multimodal content (a list of text/image_url parts, per
                 # the OpenAI vision format) isn't plain text — trimming it
@@ -136,18 +135,10 @@ def history_window(turns: list[Turn], config: CompressorConfig) -> list[Turn]:
                     new_messages.append({**m, "content": _extractive_trim(content)})
                 else:
                     new_messages.append(m)
-            elif role == "tool":
-                # Tool-call results are structured data (often JSON) —
-                # trimming them with sentence-boundary regex would corrupt
-                # the result. Pass through unmodified. This also keeps the
-                # tool-call chain (assistant.tool_calls → tool → assistant)
-                # intact rather than leaving orphaned tool_calls behind.
-                new_messages.append(m)
-            # Older system / developer messages (footers, memory blocks) in
-            # dropped turns carry little standalone value once the turn
-            # itself has been trimmed — drop them here; dedupe_verbatim_tail
-            # already ran before this in the pipeline for the ones worth
-            # keeping.
+            # Older system messages (footers, memory blocks) in dropped
+            # turns carry little standalone value once the turn itself has
+            # been trimmed — drop them here; dedupe_verbatim_tail already
+            # ran before this in the pipeline for the ones worth keeping.
         if new_messages:
             trimmed.append(Turn(new_messages))
     return trimmed + recent_turns
