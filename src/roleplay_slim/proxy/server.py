@@ -34,6 +34,23 @@ _HOP_BY_HOP_HEADERS = frozenset({
 })
 
 
+def _bearer_token(auth_header: str | None) -> str:
+    """Extract the token portion of a Bearer auth header.
+
+    A header that's present but carries no real token (e.g. some client
+    apps always send ``Authorization: Bearer `` with nothing after it when
+    their own API key setting is empty) means "no real credential" just as
+    much as a missing header does — callers should fall back to the
+    proxy's configured upstream key rather than forward a credential-less
+    header that would just 401 upstream.
+    """
+    if not auth_header:
+        return ""
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[len("Bearer "):].strip()
+    return auth_header.strip()
+
+
 def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
     """transport lets tests substitute an httpx.MockTransport for the real
     network call, so the proxy's own request/response handling (headers,
@@ -139,13 +156,24 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
 
         entry = stats.record(messages, compressed)
         pct = (entry["saved"] / entry["tokens_before"] * 100) if entry["tokens_before"] else 0.0
+
+        # Diagnostic: show message structure so we can tell why compression
+        # rate is low (small prefix? few turns? already-under-window?).
+        from ..segmenter import segment
+
+        prefix, turns = segment(messages)
+        tcounts = [len(t.messages) for t in turns]
         logger.info(
-            "request #%d | %d -> %d tokens (saved %d, %.1f%%)",
+            "request #%d | %d -> %d tokens (saved %d, %.1f%%) | msgs:%d pre:%d turns:%d%s",
             stats.request_count,
             entry["tokens_before"],
             entry["tokens_after"],
             entry["saved"],
             pct,
+            len(messages),
+            len(prefix),
+            len(turns),
+            f" tcounts:{tcounts}" if tcounts else "",
         )
         body["messages"] = compressed
 
@@ -158,7 +186,15 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
             if k.lower() not in _HOP_BY_HOP_HEADERS
         }
         headers["content-type"] = "application/json"
-        headers["authorization"] = incoming_auth or (f"Bearer {api_key}" if api_key else "")
+        # A caller-supplied Authorization header only wins if it actually
+        # carries a token — some client apps send a bare "Bearer " with
+        # nothing after it when their own API key setting is empty, which
+        # is not a real credential and would just 401 upstream if forwarded
+        # as-is.
+        headers["authorization"] = (
+            incoming_auth if _bearer_token(incoming_auth)
+            else (f"Bearer {api_key}" if api_key else "")
+        )
 
         upstream_url = f"{config.upstream_base_url.rstrip('/')}/chat/completions"
         # Forward query-string parameters (e.g. ?customer_id=...) so the

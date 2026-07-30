@@ -102,6 +102,32 @@ def test_authorization_header_passthrough():
     assert captured["auth"] == "Bearer caller-supplied-key"
 
 
+def test_empty_bearer_token_falls_back_to_configured_upstream_key(monkeypatch):
+    """Some client apps always send "Authorization: Bearer " (no token
+    after it) when their own API key setting is empty — that's not a real
+    credential and must not be forwarded as-is, since the real upstream
+    would just 401 it. The proxy's own configured key should be used
+    instead, exactly as if no Authorization header had been sent at all."""
+    monkeypatch.setenv("ROLEPLAY_SLIM_TEST_EMPTY_BEARER_KEY", "sk-real-upstream-key")
+    config = ProxyConfig(
+        compressor=CompressorConfig(keep_recent_turns=1),
+        upstream_api_key_env="ROLEPLAY_SLIM_TEST_EMPTY_BEARER_KEY",
+    )
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json={"choices": []})
+
+    client = _make_client(handler, config=config)
+    client.post(
+        "/v1/chat/completions",
+        json=_sample_body(),
+        headers={"Authorization": "Bearer "},
+    )
+    assert captured["auth"] == "Bearer sk-real-upstream-key"
+
+
 def test_warns_at_creation_when_no_upstream_key_is_configured(caplog):
     """A forgotten UPSTREAM_API_KEY otherwise fails silently until the first
     request hits a confusing 401 from upstream — this should be visible
