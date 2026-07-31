@@ -192,7 +192,7 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
         # is not a real credential and would just 401 upstream if forwarded
         # as-is.
         headers["authorization"] = (
-            incoming_auth if _bearer_token(incoming_auth)
+            incoming_auth if incoming_auth is not None and _bearer_token(incoming_auth)
             else (f"Bearer {api_key}" if api_key else "")
         )
 
