@@ -60,6 +60,77 @@ def _bearer_token(auth_header: str | None) -> str:
     return auth_header.strip()
 
 
+def _check_client_auth(
+    incoming_auth: str | None, config: ProxyConfig, client_auth_token: str
+) -> tuple[JSONResponse | None, str | None]:
+    """Gate access to the proxy itself (distinct from the upstream
+    provider's auth).
+
+    Returns ``(error_response, forwardable_auth)``. A non-None first
+    element means the caller must return it immediately. Otherwise the
+    second element is the Authorization header that may still be
+    forwarded upstream — None once proxy-level auth has consumed it,
+    since a header that authenticated access *to the proxy* is not an
+    upstream credential and must not be passed along.
+
+    Shared by every route that spends the upstream API key. A route that
+    skipped this would let anyone who can reach the proxy's port bill
+    calls to the operator's real provider account.
+    """
+    if not config.client_auth_token_env:
+        return None, incoming_auth
+
+    expected = f"Bearer {client_auth_token}" if client_auth_token else None
+    if not client_auth_token or not secrets.compare_digest(
+        incoming_auth or "", expected or ""
+    ):
+        return (
+            JSONResponse(
+                {"error": {"message": "invalid or missing proxy credentials"}},
+                status_code=401,
+            ),
+            None,
+        )
+    return None, None
+
+
+def _build_upstream_headers(
+    request: Request, incoming_auth: str | None, api_key: str
+) -> dict[str, str]:
+    """Forward every request header that isn't hop-by-hop, then overwrite
+    the two headers the proxy controls: Content-Type and Authorization.
+
+    A caller-supplied Authorization header only wins if it actually
+    carries a token — some client apps send a bare "Bearer " with nothing
+    after it when their own API key setting is empty, which is not a real
+    credential and would just 401 upstream if forwarded as-is.
+    """
+    headers = {
+        k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP_HEADERS
+    }
+    headers["content-type"] = "application/json"
+    headers["authorization"] = (
+        incoming_auth
+        if incoming_auth is not None and _bearer_token(incoming_auth)
+        else (f"Bearer {api_key}" if api_key else "")
+    )
+    return headers
+
+
+def _passthrough_response(resp: httpx.Response) -> Response:
+    """Return an upstream response verbatim — JSON, HTML error page, plain
+    text, or empty body — rather than assuming JSON and crashing on the
+    first CDN/gateway error page that isn't."""
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers={
+            k: v for k, v in resp.headers.items() if k.lower() not in _HOP_BY_HOP_HEADERS
+        },
+        media_type=resp.headers.get("content-type"),
+    )
+
+
 def _record_upstream_usage(stats: CompressionStats, resp: httpx.Response) -> None:
     """Pull the provider-reported `usage` block out of a completed upstream
     response and hand it to stats.
@@ -159,19 +230,9 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
         # Access control for the proxy itself, separate from the upstream
         # provider's own auth. Only enforced if the operator opted in via
         # client_auth_token_env — zero-config deployments are unaffected.
-        if config.client_auth_token_env:
-            expected = f"Bearer {client_auth_token}" if client_auth_token else None
-            if not client_auth_token or not secrets.compare_digest(
-                incoming_auth or "", expected or ""
-            ):
-                return JSONResponse(
-                    {"error": {"message": "invalid or missing proxy credentials"}},
-                    status_code=401,
-                )
-            # This header authenticated access to the proxy, not to the
-            # upstream provider — don't forward it; always use the proxy's
-            # own configured upstream key instead.
-            incoming_auth = None
+        auth_error, incoming_auth = _check_client_auth(incoming_auth, config, client_auth_token)
+        if auth_error is not None:
+            return auth_error
 
         # Validate the request body before touching anything else — a
         # malformed request should get a clear 400, not an internal 500
@@ -232,24 +293,7 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
         )
         body["messages"] = compressed
 
-        # Forward every request header that isn't hop-by-hop, then
-        # overwrite the two headers we control: Content-Type (always JSON
-        # for an OpenAI-compatible request) and Authorization (the real
-        # upstream key, unless the caller supplied their own).
-        headers = {
-            k: v for k, v in request.headers.items()
-            if k.lower() not in _HOP_BY_HOP_HEADERS
-        }
-        headers["content-type"] = "application/json"
-        # A caller-supplied Authorization header only wins if it actually
-        # carries a token — some client apps send a bare "Bearer " with
-        # nothing after it when their own API key setting is empty, which
-        # is not a real credential and would just 401 upstream if forwarded
-        # as-is.
-        headers["authorization"] = (
-            incoming_auth if incoming_auth is not None and _bearer_token(incoming_auth)
-            else (f"Bearer {api_key}" if api_key else "")
-        )
+        headers = _build_upstream_headers(request, incoming_auth, api_key)
 
         upstream_url = f"{config.upstream_base_url.rstrip('/')}/chat/completions"
         # Forward query-string parameters (e.g. ?customer_id=...) so the
@@ -270,19 +314,7 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                     {"error": {"message": f"upstream request failed: {e}"}}, status_code=502
                 )
             _record_upstream_usage(stats, resp)
-            # Pass through the raw upstream response — JSON, HTML error
-            # page, plain text, or empty body — rather than assuming JSON
-            # and crashing on the first CDN/gateway error page that isn't.
-            resp_headers = {
-                k: v for k, v in resp.headers.items()
-                if k.lower() not in _HOP_BY_HOP_HEADERS
-            }
-            return Response(
-                content=resp.content,
-                status_code=resp.status_code,
-                headers=resp_headers,
-                media_type=resp.headers.get("content-type"),
-            )
+            return _passthrough_response(resp)
 
         # Open the upstream connection and read its status/headers before
         # committing to a StreamingResponse — once streaming has started,
@@ -317,5 +349,51 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
             headers=resp_headers,
             media_type=resp.headers.get("content-type", "text/event-stream"),
         )
+
+    # Registered *after* /v1/chat/completions so the explicit route keeps
+    # winning — Starlette matches routes in registration order, and a
+    # catch-all that shadowed the compression endpoint would silently turn
+    # this whole project into a plain forwarding proxy.
+    #
+    # Exists because real clients call more than one endpoint: SillyTavern,
+    # OpenWebUI and friends fetch GET /v1/models on connect to populate
+    # their model picker, and a 404 there reads as "this server is broken"
+    # before the user ever gets to send a message. Nothing here is
+    # compressed — these endpoints carry no `messages` array.
+    @app.api_route(
+        "/v1/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"]
+    )
+    async def passthrough(path: str, request: Request):
+        incoming_auth = request.headers.get("authorization")
+        auth_error, incoming_auth = _check_client_auth(incoming_auth, config, client_auth_token)
+        if auth_error is not None:
+            return auth_error
+
+        upstream_url = f"{config.upstream_base_url.rstrip('/')}/{path}"
+        qs = request.url.query
+        if qs:
+            upstream_url = f"{upstream_url}?{qs}"
+
+        headers = _build_upstream_headers(request, incoming_auth, api_key)
+        raw_body = await request.body()
+        # Content-Type is forced to JSON by _build_upstream_headers for the
+        # benefit of the chat endpoint; a bodyless GET must not claim to
+        # carry a JSON body.
+        if not raw_body:
+            headers.pop("content-type", None)
+
+        client: httpx.AsyncClient = request.app.state.client
+        try:
+            resp = await client.request(
+                request.method, upstream_url, content=raw_body or None, headers=headers
+            )
+        except httpx.HTTPError as e:
+            logger.warning("upstream passthrough request failed: %s", e)
+            return JSONResponse(
+                {"error": {"message": f"upstream request failed: {e}"}}, status_code=502
+            )
+
+        logger.info("passthrough %s /v1/%s -> %d", request.method, path, resp.status_code)
+        return _passthrough_response(resp)
 
     return app

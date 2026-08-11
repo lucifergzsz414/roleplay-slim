@@ -609,3 +609,168 @@ def test_estimated_stats_still_reported_alongside_upstream():
     assert summary["tokens_before_total"] > 0
     assert summary["tokens_after_total"] > 0
     assert summary["upstream"]["prompt_tokens_total"] == 999
+
+
+# --- non-chat endpoint passthrough --------------------------------------
+#
+# Real clients call more than /v1/chat/completions. SillyTavern, OpenWebUI
+# and friends fetch GET /v1/models on connect to populate a model picker,
+# and a 404 there reads as a broken server before the user sends anything.
+
+
+def test_models_endpoint_is_forwarded_upstream():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["method"] = request.method
+        return httpx.Response(200, json={"object": "list", "data": [{"id": "deepseek-chat"}]})
+
+    client = _make_client(handler)
+    resp = client.get("/v1/models")
+
+    assert resp.status_code == 200
+    assert resp.json()["data"][0]["id"] == "deepseek-chat"
+    assert captured["method"] == "GET"
+    assert captured["url"].endswith("/models")
+
+
+def test_nested_passthrough_path_is_preserved():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"id": "deepseek-chat"})
+
+    client = _make_client(handler)
+    assert client.get("/v1/models/deepseek-chat").status_code == 200
+    assert captured["url"].endswith("/models/deepseek-chat")
+
+
+def test_passthrough_forwards_query_string():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={})
+
+    client = _make_client(handler)
+    client.get("/v1/models?customer_id=abc")
+    assert "customer_id=abc" in captured["url"]
+
+
+def test_passthrough_post_forwards_body():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"data": []})
+
+    client = _make_client(handler)
+    resp = client.post("/v1/embeddings", json={"model": "e5", "input": "hello"})
+
+    assert resp.status_code == 200
+    assert captured["body"] == {"model": "e5", "input": "hello"}
+
+
+def test_passthrough_does_not_compress():
+    """These endpoints carry no `messages` array, and the request body must
+    arrive upstream byte-identical to what the caller sent."""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["raw"] = request.content
+        return httpx.Response(200, json={})
+
+    payload = {"model": "e5", "input": ["a", "b", "c"]}
+    client = _make_client(handler)
+    client.post("/v1/embeddings", json=payload)
+
+    assert json.loads(captured["raw"]) == payload
+
+
+def test_catch_all_does_not_shadow_chat_completions():
+    """Registration-order regression guard: if the catch-all ever matched
+    /v1/chat/completions first, compression would silently stop happening
+    and this project would become a plain forwarding proxy."""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": []})
+
+    client = _make_client(handler)  # keep_recent_turns=1
+    resp = client.post("/v1/chat/completions", json=_sample_body())
+
+    assert resp.status_code == 200
+    # Compression actually ran: fewer messages went upstream than came in.
+    assert len(captured["body"]["messages"]) < len(_sample_body()["messages"])
+
+
+def test_upstream_error_status_passes_through():
+    client = _make_client(
+        lambda request: httpx.Response(404, json={"error": {"message": "no such model"}})
+    )
+    resp = client.get("/v1/models/nope")
+
+    assert resp.status_code == 404
+    assert resp.json()["error"]["message"] == "no such model"
+
+
+def test_passthrough_upstream_connection_failure_returns_502():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom")
+
+    client = _make_client(handler)
+    resp = client.get("/v1/models")
+
+    assert resp.status_code == 502
+    assert "upstream request failed" in resp.json()["error"]["message"]
+
+
+def test_passthrough_requires_proxy_credentials_when_configured(monkeypatch):
+    """The security point of the catch-all: a route that spends the
+    upstream API key without checking proxy auth would let anyone who can
+    reach this port bill calls to the operator's provider account."""
+    monkeypatch.setenv("PROXY_SECRET", "s3cret")
+    config = ProxyConfig(
+        client_auth_token_env="PROXY_SECRET",
+        compressor=CompressorConfig(keep_recent_turns=1),
+    )
+    client = _make_client(lambda request: httpx.Response(200, json={}), config=config)
+
+    assert client.get("/v1/models").status_code == 401
+    assert client.get(
+        "/v1/models", headers={"Authorization": "Bearer wrong"}
+    ).status_code == 401
+    assert client.get(
+        "/v1/models", headers={"Authorization": "Bearer s3cret"}
+    ).status_code == 200
+
+
+def test_passthrough_does_not_forward_proxy_credential_upstream(monkeypatch):
+    """The proxy's own secret authenticates access to the proxy — it is not
+    an upstream credential and must never reach the provider."""
+    monkeypatch.setenv("PROXY_SECRET", "s3cret")
+    monkeypatch.setenv("UPSTREAM_API_KEY", "real-upstream-key")
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json={})
+
+    config = ProxyConfig(
+        client_auth_token_env="PROXY_SECRET",
+        compressor=CompressorConfig(keep_recent_turns=1),
+    )
+    client = _make_client(handler, config=config)
+    client.get("/v1/models", headers={"Authorization": "Bearer s3cret"})
+
+    assert captured["auth"] == "Bearer real-upstream-key"
+
+
+def test_local_endpoints_are_not_swallowed_by_catch_all():
+    client = _make_client(lambda request: httpx.Response(200, json={}))
+
+    assert client.get("/healthz").json() == {"status": "ok"}
+    assert "request_count" in client.get("/stats").json()
