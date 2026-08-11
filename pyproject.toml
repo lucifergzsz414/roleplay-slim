@@ -32,6 +32,8 @@ dev = [
 ]
 
 [project.scripts]
+roleplay-slim = "roleplay_slim.cli:main"
+# Kept as-is: existing deployments and service files invoke this directly.
 roleplay-slim-proxy = "roleplay_slim.proxy.__main__:main"
 
 [tool.hatch.build.targets.wheel]
