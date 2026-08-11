@@ -10,6 +10,64 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 (Nothing yet.)
 
+## [0.3.0] — 2026-08-11
+
+### Added
+
+- `max_prompt_tokens`: an actual ceiling on the compressed prompt. Every setting until
+  now was structural — "keep the last 6 turns" says nothing about how large those turns
+  are, so the output had no upper bound at all. The gap is not theoretical: the
+  extractive trim in `history_window` splits on sentence-ending punctuation, and short
+  chat lines often have none (`"ok"`, `"在吗"`), so it returns them unchanged. Measured
+  on 40 turns of that traffic: 1.1% saved without a budget, 90.0% with one. Whole turns
+  are dropped rather than individual messages, keeping `tool_calls` → `tool` chains
+  intact. The prefix, the most recent `budget_min_recent_turns` turns, and recurring
+  system messages are never sacrificed to meet it; an unmeetable budget is logged and
+  left unmet rather than honoured by breaking the prompt, and never raises. Off by
+  default — a config that doesn't mention it is byte-for-byte unchanged.
+- `history_window_mode = "summarize"` plus a `summarizer` callable: hands the aged-out
+  history to your own condensing function and replaces the whole block with the one
+  string it returns. The library still takes no ML dependency and still doesn't rewrite
+  anyone's dialogue itself — apps in this space usually already have a memory layer whose
+  output beats a regex. On 50 turns of punctuation-free chat: `trim` 2.7%, `drop` 92.6%,
+  `summarize` 92.2% — but `drop` gets there by discarding the history, while `summarize`
+  keeps a condensed memory of it. The callback may fail: raising or returning a
+  non-string is logged and falls back to `trim`, an empty return drops the block, and it
+  isn't called at all when nothing has aged out.
+- `/stats` now reports the provider's own token accounting alongside the local estimates,
+  under an `upstream` key — including `prompt_cache_hit_tokens` on providers that expose
+  it. Preserving the upstream prefix cache is this project's central claim and it
+  previously had no measurement behind it. The block is `null` before anything is
+  measured rather than a row of zeroes, and the cache fields stay `null` on providers
+  that don't report a breakdown instead of collapsing to a misleading 0% hit rate.
+  Non-streaming responses only — a streamed response carries usage only when the caller
+  sets `stream_options.include_usage`.
+- The proxy forwards any `/v1/*` endpoint other than chat completions (`/v1/models`,
+  `/v1/embeddings`, …) verbatim and uncompressed. SillyTavern, OpenWebUI and similar
+  clients fetch `GET /v1/models` on connect to populate a model picker, and the 404 they
+  got instead read as a broken server before a single message could be sent. The
+  catch-all goes through the same `client_auth_token_env` gate as the chat endpoint —
+  it spends the same upstream key.
+- `roleplay-slim preview`: a new CLI that shows what compression would do to a captured
+  conversation, with no network call and nothing written. Reads a messages array or a
+  full request body, from a file or stdin. `--json` emits the compressed messages;
+  `--quiet` gives the summary alone. It deliberately does not claim a one-to-one mapping
+  between original and compressed messages — none reliably exists — and reports instead
+  whether content survives verbatim, plus the resulting prompt itself.
+
+### Fixed
+
+- The proxy no longer forwards a stale `content-encoding` header on a response body that
+  httpx has already decompressed. Clients without brotli support (Unity's
+  `UnityWebRequest` among them) failed with "Unrecognized content-encoding" even though
+  the bytes they received were plain text.
+
+### Notes
+
+- `roleplay-slim-proxy` is unchanged and existing service files keep working; the new
+  `roleplay-slim` entry point is additive.
+- Test count: 88 → 167.
+
 ## [0.2.0] — 2026-07-26
 
 ### Added

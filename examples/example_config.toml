@@ -35,3 +35,36 @@ history_window_mode = "trim"
 # "halfwidth_parens", "asterisk", "square_bracket") or your own raw regex
 # if your app uses a different convention.
 stage_direction_pattern = "fullwidth_parens"
+
+# --- Optional: a hard ceiling on the whole prompt ------------------------
+#
+# Everything above is structural — it controls the *shape* of what gets
+# sent, never its size. If you need a guaranteed upper bound (to cap cost,
+# or to stay clear of a context limit), set one here and the oldest turns
+# are dropped until the estimate fits.
+#
+# Worth setting if your users send short lines with no sentence-ending
+# punctuation ("ok", "在吗"): the extractive trim above needs at least two
+# sentences to work with, so on that kind of traffic it does almost
+# nothing and only a budget will bring the size down.
+#
+# The cache-stable prefix is never dropped to meet this, and neither are
+# the most recent budget_min_recent_turns turns — a budget too small for
+# those is logged and left unmet rather than met by breaking the prompt.
+#
+# max_prompt_tokens = 4096
+# budget_min_recent_turns = 1
+
+# --- Optional: your own summarizer --------------------------------------
+#
+# history_window_mode = "summarize" replaces the aged-out history with one
+# message produced by a callable you supply. It cannot be configured here
+# — TOML can only produce data, never a function — so load this file and
+# then attach it:
+#
+#     config = ProxyConfig.from_toml("config.toml")
+#     config.compressor.summarizer = my_summarizer
+#     config.compressor.history_window_mode = "summarize"
+#
+# Setting `summarizer` as a key in this file is rejected with an
+# explanation rather than failing later inside compression.

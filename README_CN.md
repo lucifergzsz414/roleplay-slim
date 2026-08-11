@@ -136,14 +136,77 @@ roleplay-slim 的压缩策略只作用于对话部分——persona 前缀在结�
 
 ---
 
-## 压缩策略（v0.2，全规则式——不依赖 ML 模型，不做有损语义评分）
+## 压缩策略（v0.3，默认全规则式——不依赖 ML 模型，不做有损语义评分）
 
 | 策略 | 作用 | 默认 |
 |---|---|---|
 | `whitespace_normalize` | 合并多余的空行和空白字符 | 开 |
 | `dedupe_verbatim_tail` | 如果完全相同的 footer/提示文字在多轮中重复出现，只保留最后一次 | 开 |
-| `history_window` | 保留最近 N 轮原文不动；更早的轮次丢弃或裁剪为首尾句摘要 | 开 |
+| `history_window` | 保留最近 N 轮原文不动；更早的轮次丢弃、裁剪为首尾句摘要，或交给你自己的摘要函数 | 开 |
 | `strip_stage_directions` | 从*较早*的轮次中移除括号/动作描写（`（…）`、`*…*`，视你的应用而定），保留实际台词——差异化核心功能 | 关（格式敏感，需主动开启） |
+| `max_prompt_tokens` | 整个 prompt 的硬性上限：丢弃最旧的轮次直到估算值达标 | 关（需主动开启） |
+
+### 不只是形状，还要有上限：`max_prompt_tokens`
+
+上面每条策略都是*结构性*的。"保留最近 6 轮"完全没说这 6 轮有多大，所以压缩
+结果本身没有任何体积上界。
+
+这个缺口不是理论问题。`history_window` 的裁剪按句末标点切分，而聊天里的短句
+经常根本没有标点——"好的"、"在吗"、"嗯"。切不出两句以上它就原样返回。在 40 轮
+这种流量上，实测压缩率是 **1.1%**。
+
+```python
+CompressorConfig(keep_recent_turns=4, max_prompt_tokens=800)
+```
+
+同样的输入、同样的裁剪策略：**90.0%**，且结果保证在 800 token 以内。
+
+丢弃的单位是整轮，不是单条消息——轮次以每条新 user 消息为界切分，所以
+assistant 的 `tool_calls` 和回应它的 `tool` 结果必定在同一轮内。按消息丢会
+留下没有对应结果的孤儿 `tool_calls`，服务商会直接拒绝。
+
+有三样东西绝不会为了达成预算而牺牲：缓存前缀、最近 `budget_min_recent_turns`
+轮（丢掉待回答的问题等于删掉这次请求本身）、以及会被重新挂回的 recurring
+system 消息。达不成的预算会记录日志并如实保持超标，而不是靠破坏 prompt 来
+"达成"；且永不抛异常——代理正在处理实时请求，不该因为一个不切实际的上限而 500。
+
+默认关闭。没写这个配置项的老配置，输出与之前**逐字节一致**。
+
+### 接入你自己的摘要函数
+
+规则式策略便宜、可预测，但很钝——见上面那个 1.1%。诚实的选择只有两个：引入 ML
+依赖并开始改写角色台词，或者让你自己来做浓缩。这里选了后者：
+
+```python
+def my_summarizer(messages: list[dict]) -> str:
+    # 你已有的记忆层、一次 LLM 调用，什么都行
+    return summarize(messages)
+
+config = CompressorConfig(
+    keep_recent_turns=4,
+    history_window_mode="summarize",
+    summarizer=my_summarizer,
+)
+```
+
+比 `keep_recent_turns` 更早的消息全部交给你的函数，整段历史被它返回的那**一条**
+字符串替代。这个领域的应用通常本来就有记忆/摘要层，其输出远好于任何正则。
+
+50 轮无标点对话实测：`trim` 2.7%、`drop` 92.6%、`summarize` **92.2%**——但
+`drop` 是直接扔掉历史，`summarize` 保留了一份浓缩记忆。对伴侣类 bot 来说，
+这个区别就是全部意义。
+
+你的回调允许失败，因为它通常是一次网络调用：
+
+| 回调行为 | 结果 |
+|---|---|
+| 抛异常（超时、API 报错） | 记日志，回退到 `trim`，请求照常发出 |
+| 返回 `""` | 视为"这段历史不值得保留"，直接丢弃该段 |
+| 返回非字符串 | 记日志，回退到 `trim` |
+| 还没有轮次过期 | 根本不调用——不浪费一次请求去摘要空内容 |
+
+天生只能用 Python 配置：callable 无法从 TOML 产生，所以在配置文件里写
+`summarizer` 会被明确拒绝并给出说明，而不是拖到压缩内部才报错。
 
 ## 性能测试
 
@@ -270,6 +333,50 @@ pip install "roleplay-slim[all]"       # 代理 + 精准 tiktoken 统计，一�
 完整的依赖闭包不到 5 MB（验证过——远没有同类工具中某些 ML-heavy 的 `[proxy]`
 extra 那么夸张）。
 
+### 先拿你自己的数据验一遍
+
+这是对你生产 prompt 的**有损**变换，上面写的一切都没法告诉你它对*你的*对话会
+做什么——`trim` 到底动不动得了你的消息、你的前缀已经占了多大比例、预算会丢掉
+哪几轮。所以开启之前先看一眼：
+
+```bash
+roleplay-slim preview conversation.json --keep-recent-turns 2
+```
+
+```
+========================================================================
+roleplay-slim preview
+========================================================================
+  messages       25  ->    18
+  tokens~       425  ->   273   saved 152 (35.8%)
+  turns           8
+
+  prefix     1 message(s), ~73 tokens (17% of the prompt) — passed through unchanged
+
+------------------------------------------------------------------------
+resulting prompt (18 messages)
+------------------------------------------------------------------------
+=   system    You are Mutsumi Wakaba, a quiet guitarist. …   [prefix]
++ user      Question 0. …… And a final sentence.
+...
+= system    [FORMAT] always end with a tag
+
+------------------------------------------------------------------------
+gone from the original (12 messages)
+------------------------------------------------------------------------
+- user      Question 0. This is a first sentence. …
+...
+```
+
+接受 messages 数组或完整的请求体，来自文件或 stdin——直接抓包 dump 下来的
+payload 不用改就能喂进去。不发任何网络请求，不写任何文件。`--json` 只输出压缩
+后的 messages 方便管道，`--quiet` 只给摘要。
+
+它刻意**不**声称原文消息和压缩结果之间存在一一对应，因为这种对应关系可靠地
+不存在——`trim` 是原地改写，`summarize` 把整段塌缩成一条新消息，去重会从任意
+位置删副本。它只报告不用猜就能确定的事：某段内容是否逐字保留下来，以及最终
+prompt 到底长什么样。
+
 ### 直观感受一下效果
 
 **不压缩** — 每次请求带着全部历史负担：
@@ -357,6 +464,40 @@ roleplay-slim-proxy --config examples/example_config.toml
 
 `GET /stats` 以 JSON 格式返回同样的累积数据，方便接入你自己的监控。
 
+#### 是证据，不只是估算
+
+上面那些数字是*估算*——用 `cl100k_base` 去数发往其他服务商的文本。`/stats`
+同时也报告服务商自己给出的数据：
+
+```json
+{
+  "request_count": 3,
+  "tokens_before_total": 19263,
+  "tokens_after_total": 19083,
+  "savings_pct": 0.93,
+  "upstream": {
+    "usage_sample_count": 3,
+    "prompt_tokens_total": 2700,
+    "completion_tokens_total": 126,
+    "cache_hit_tokens_total": 1536,
+    "cache_miss_tokens_total": 1164,
+    "cache_hit_pct": 56.89
+  }
+}
+```
+
+关键是 `cache_hit_pct`。本项目的核心主张是"保持前缀逐字节不变，服务商的前缀
+缓存就会继续命中"——现在这是一个你能读到的数字，而不是一句需要你选择相信的
+承诺。
+
+两组数据互补，谁也替代不了谁：估算值覆盖压缩前后的差值（服务商根本看不到
+未压缩的版本），`upstream` 块覆盖你实际被计费的量。
+
+没有采到样本之前该块是 `null` 而不是一排 0——"没测量"和"测到 0"是两回事。
+不报告缓存明细的服务商（OpenAI 就是）其 `cache_*` 字段保持 `null`，而不是
+被压成一个误导性的 0% 命中率。流式响应不计入：只有调用方设置了
+`stream_options.include_usage` 时才会带 usage。
+
 详细配置见 `examples/example_config.toml`，这是一份参照真实生产角色扮演 bot
 的消息结构编写的示例配置。
 
@@ -390,6 +531,8 @@ export PROXY_ACCESS_TOKEN=一段长的随机字符串
 | | |
 |---|---|
 | ✅ `POST /v1/chat/completions` | 完整支持——普通和流式 |
+| ✅ `GET /v1/models`、`/v1/models/{id}` | 原样透传、不压缩——SillyTavern、OpenWebUI 等客户端连接时会拉这个来填充模型列表 |
+| ✅ 其他任意 `/v1/*` 端点 | 原样透传（embeddings 等）。chat completions 之外的端点都不带 `messages`，因此也都不做压缩 |
 | ✅ `system` / `user` / `assistant` 角色 | 完整支持 |
 | ✅ 流式 (SSE) | 透明透传 |
 | ✅ OpenAI 兼容客户端库 | 换 `base_url` 即用 |
@@ -401,7 +544,9 @@ export PROXY_ACCESS_TOKEN=一段长的随机字符串
 
 ## 状态
 
-v0.2 — 已针对一个生产环境角色扮演 bot 的流量构建并自用验证。
+v0.3 — 已针对一个生产环境角色扮演 bot 的流量构建并自用验证。167 个测试，
+含基于 Hypothesis 的属性测试（对生成的各种消息结构验证不变量）。
+
 欢迎贡献，特别是为其他应用的格式约定增加 `stage_direction_pattern` 预设。
 
 ## 许可证

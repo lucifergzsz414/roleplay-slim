@@ -152,15 +152,93 @@ transform on the prefix region by default.
 
 ---
 
-## What it compresses (v0.2, all rule-based — no ML model, no lossy
+## What it compresses (v0.3 — rule-based by default, no ML model, no lossy
 semantic scoring)
 
 | Strategy | What it does | Default |
 |---|---|---|
 | `whitespace_normalize` | Collapses redundant blank lines/whitespace | on |
 | `dedupe_verbatim_tail` | If the exact same footer/reminder text repeats across turns, keeps only the last copy | on |
-| `history_window` | Keeps the most recent N turns verbatim; older turns get dropped or trimmed to a first+last-sentence stub | on |
+| `history_window` | Keeps the most recent N turns verbatim; older turns get dropped, trimmed to a first+last-sentence stub, or handed to your own summarizer | on |
 | `strip_stage_directions` | Removes parenthetical/action-description text (`（…）`, `*…*`, whatever your app uses) from *older* turns only, keeping actual dialogue intact — the differentiator | off (format-sensitive, opt-in) |
+| `max_prompt_tokens` | Hard ceiling on the whole prompt: drops the oldest turns until the estimate fits | off (opt-in) |
+
+### A ceiling, not just a shape: `max_prompt_tokens`
+
+Every strategy above is *structural*. "Keep the last 6 turns" says nothing
+about how big those turns are, so on its own the compressed output has no
+upper bound.
+
+That gap is not theoretical. The extractive trim in `history_window` splits
+on sentence-ending punctuation, and short chat lines often have none —
+`"ok"`, `"在吗"`, `"lol"`. With fewer than two sentences to work with it
+returns the text unchanged. On 40 turns of that traffic, compression came
+to **1.1%**.
+
+```python
+CompressorConfig(keep_recent_turns=4, max_prompt_tokens=800)
+```
+
+Same input, same trim: **90.0%**, and the result is guaranteed under 800
+tokens.
+
+Whole turns are dropped, never individual messages — turns break at each
+new user message, so an assistant `tool_calls` block and the `tool`
+results answering it always live in the same turn. Per-message pruning
+could strand a `tool_calls` with no matching results, which providers
+reject outright.
+
+Three things are never sacrificed to meet the budget: the cache-stable
+prefix, the most recent `budget_min_recent_turns` turns (dropping the
+pending question deletes the request itself), and recurring system
+messages, which are re-attached afterwards. A budget that can't be met is
+logged and left unmet rather than honoured by breaking the prompt — and it
+never raises, because a proxy mid-request shouldn't 500 over an
+unrealistic ceiling.
+
+Off by default. A config that doesn't mention it behaves byte-for-byte as
+it did before.
+
+### Bring your own summarizer
+
+The rules here are cheap and predictable but blunt — see the 1.1% above.
+The honest options were to take on an ML dependency and start rewriting
+characters' dialogue, or to let you do the condensing. This is the second:
+
+```python
+def my_summarizer(messages: list[dict]) -> str:
+    # Your existing memory layer, an LLM call, anything you like.
+    return summarize(messages)
+
+config = CompressorConfig(
+    keep_recent_turns=4,
+    history_window_mode="summarize",
+    summarizer=my_summarizer,
+)
+```
+
+Every message older than `keep_recent_turns` goes to your callable, and
+the whole block is replaced by the single string it returns. Apps in this
+space usually already have a memory/summary layer whose output beats
+anything a regex could produce.
+
+On 50 turns of punctuation-free chat: `trim` 2.7%, `drop` 92.6%,
+`summarize` **92.2%** — but `drop` gets there by discarding the history
+outright, while `summarize` keeps a condensed memory of it. For a
+companion bot that difference is the entire point.
+
+Your callback is allowed to fail. It's usually a network call:
+
+| Your callback | What happens |
+|---|---|
+| Raises (timeout, API error) | Logged, falls back to `trim`. The request still goes through. |
+| Returns `""` | Read as "this history isn't worth keeping" — the block is dropped |
+| Returns a non-string | Logged, falls back to `trim` |
+| Nothing has aged out yet | Not called at all — no spending a request to summarize an empty block |
+
+Python-only by nature: a callable can't come from TOML, so setting
+`summarizer` in a config file is rejected with an explanation rather than
+failing later inside compression.
 
 ## Benchmarks
 
@@ -307,6 +385,56 @@ extra names to get everything working; the full dependency closure is under
 5 MB (verified — nowhere near the ML-heavy `[proxy]` extras some other tools
 in this space pull in).
 
+### Check it against your own data first
+
+This is a lossy transform on your production prompts, and nothing above
+tells you what it will do to *your* conversations — whether `trim` touches
+your messages at all, how much of the prompt your prefix already occupies,
+which turns a budget would drop. So look before you switch it on:
+
+```bash
+roleplay-slim preview conversation.json --keep-recent-turns 2
+```
+
+```
+========================================================================
+roleplay-slim preview
+========================================================================
+  messages       25  ->    18
+  tokens~       425  ->   273   saved 152 (35.8%)
+  turns           8
+
+  prefix     1 message(s), ~73 tokens (17% of the prompt) — passed through unchanged
+
+------------------------------------------------------------------------
+resulting prompt (18 messages)
+------------------------------------------------------------------------
+=   system    You are Mutsumi Wakaba, a quiet guitarist. You are Mutsumi…   [prefix]
++ user      Question 0. …… And a final sentence.
++ assistant Answer 0. …… Closing thought.
+...
+= user      Question 7. This is a first sentence. This is a middle one. …
+= system    [FORMAT] always end with a tag
+
+------------------------------------------------------------------------
+gone from the original (12 messages)
+------------------------------------------------------------------------
+- user      Question 0. This is a first sentence. This is a middle one. …
+...
+```
+
+Takes a messages array or a full captured request body, from a file or
+stdin, so a payload dumped straight off the wire works unedited. Makes no
+network calls and writes no files. `--json` emits the compressed messages
+for piping somewhere else; `--quiet` gives you the summary alone.
+
+It deliberately does **not** claim a one-to-one mapping between original
+and compressed messages, because none reliably exists — `trim` rewrites in
+place, `summarize` collapses a block into one new message, dedupe removes
+copies from arbitrary positions. It reports what can be established
+without guessing: whether a piece of content survives verbatim, and what
+the resulting prompt actually looks like.
+
 ### See the difference
 
 **Without compression** — every request carries the full weight of history:
@@ -397,6 +525,46 @@ so you can see compression working without needing to poll `/stats`:
 `GET /stats` returns the same numbers as running totals, in JSON, if you
 want to pull them into your own monitoring instead.
 
+#### Proof, not just estimates
+
+Those figures are *estimates* — `cl100k_base` run over text bound for
+whatever provider you're actually using. `/stats` also reports what the
+provider itself said:
+
+```json
+{
+  "request_count": 3,
+  "tokens_before_total": 19263,
+  "tokens_after_total": 19083,
+  "savings_pct": 0.93,
+  "upstream": {
+    "usage_sample_count": 3,
+    "prompt_tokens_total": 2700,
+    "completion_tokens_total": 126,
+    "cache_hit_tokens_total": 1536,
+    "cache_miss_tokens_total": 1164,
+    "cache_hit_pct": 56.89
+  }
+}
+```
+
+`cache_hit_pct` is the one that matters. This project's central claim is
+that leaving the prefix byte-identical keeps the provider's prefix cache
+hitting — and now that's a number you can read rather than a promise you
+have to take on faith.
+
+Both sets of figures are useful and neither replaces the other: the
+estimate covers the compression delta (the provider never sees the
+uncompressed version), the `upstream` block covers what you were actually
+billed for.
+
+The block is `null` until something has been measured, rather than a row
+of zeroes — "not measured" and "measured zero" are different claims.
+`cache_*` fields stay `null` on providers that don't report a cache
+breakdown (OpenAI among them) instead of being flattened into a
+misleading 0% hit rate. Streaming responses aren't counted: they only
+carry usage when the caller sets `stream_options.include_usage`.
+
 See `examples/example_config.toml` for a config modeled on a real
 production roleplay bot's message structure.
 
@@ -435,6 +603,8 @@ turning into an unhandled exception or a misleading 200.
 | | |
 |---|---|
 | ✅ `POST /v1/chat/completions` | Full support — both regular and streaming |
+| ✅ `GET /v1/models`, `/v1/models/{id}` | Forwarded verbatim, uncompressed — clients like SillyTavern and OpenWebUI fetch this on connect to populate their model picker |
+| ✅ Any other `/v1/*` endpoint | Forwarded verbatim (embeddings, etc.). Nothing outside chat completions carries a `messages` array, so nothing outside it is compressed |
 | ✅ `system` / `user` / `assistant` roles | Full support |
 | ✅ Streaming (SSE) | Transparent pass-through |
 | ✅ OpenAI-compatible client libraries | Drop-in `base_url` swap |
@@ -446,7 +616,10 @@ turning into an unhandled exception or a misleading 200.
 
 ## Status
 
-v0.2 — built and dogfooded against one production roleplay bot's traffic.
+v0.3 — built and dogfooded against one production roleplay bot's traffic.
+167 tests, including Hypothesis property tests over generated message
+shapes.
+
 Contributions welcome, especially additional `stage_direction_pattern`
 presets for other apps' conventions.
 
