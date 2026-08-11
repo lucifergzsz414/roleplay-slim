@@ -27,10 +27,19 @@ logger = logging.getLogger("roleplay_slim")
 # Headers that must never be forwarded, per RFC 2616 §13.5.1 — they belong
 # to a single hop (the proxy's own connection from/to its peer), not to the
 # end-to-end request/response.
+#
+# content-encoding is included for a different reason: httpx transparently
+# decompresses the upstream response body (gzip/br/deflate) before we ever
+# see resp.content / resp.aiter_bytes(), but resp.headers still carries the
+# original encoding the upstream server sent. Forwarding that stale header
+# alongside an already-decoded body lies to the client about the encoding —
+# e.g. UnityWebRequest doesn't support brotli and fails with
+# "Unrecognized content-encoding" even though the bytes it received are
+# plain text.
 _HOP_BY_HOP_HEADERS = frozenset({
     "host", "content-length", "connection", "transfer-encoding",
     "keep-alive", "upgrade", "proxy-authenticate", "proxy-authorization",
-    "te", "trailers",
+    "te", "trailers", "content-encoding",
 })
 
 
