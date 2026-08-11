@@ -457,3 +457,155 @@ def test_hop_by_hop_request_headers_are_stripped():
     assert captured["keep-alive"] is None
     assert captured["te"] is None
     assert captured["upgrade"] is None
+
+
+# --- upstream usage capture ---------------------------------------------
+#
+# Everything else /stats reports is an estimate produced by running an
+# OpenAI tokenizer over text bound for some other provider. These tests
+# cover the one part that is a real measurement: the provider's own
+# accounting, lifted out of the response body on the way through.
+
+
+def _usage_response(usage: dict | None) -> httpx.Response:
+    payload: dict = {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+    if usage is not None:
+        payload["usage"] = usage
+    return httpx.Response(200, json=payload)
+
+
+def test_upstream_usage_is_recorded_from_response():
+    client = _make_client(
+        lambda request: _usage_response(
+            {
+                "prompt_tokens": 1234,
+                "completion_tokens": 56,
+                "prompt_cache_hit_tokens": 512,
+                "prompt_cache_miss_tokens": 722,
+            }
+        )
+    )
+    client.post("/v1/chat/completions", json=_sample_body())
+
+    upstream = client.get("/stats").json()["upstream"]
+    assert upstream["usage_sample_count"] == 1
+    assert upstream["prompt_tokens_total"] == 1234
+    assert upstream["completion_tokens_total"] == 56
+    assert upstream["cache_hit_tokens_total"] == 512
+    assert upstream["cache_miss_tokens_total"] == 722
+    # 512 / (512 + 722)
+    assert upstream["cache_hit_pct"] == pytest.approx(41.49, abs=0.01)
+
+
+def test_upstream_usage_totals_accumulate_across_requests():
+    client = _make_client(
+        lambda request: _usage_response({"prompt_tokens": 100, "completion_tokens": 10})
+    )
+    for _ in range(3):
+        client.post("/v1/chat/completions", json=_sample_body())
+
+    upstream = client.get("/stats").json()["upstream"]
+    assert upstream["usage_sample_count"] == 3
+    assert upstream["prompt_tokens_total"] == 300
+    assert upstream["completion_tokens_total"] == 30
+
+
+def test_upstream_block_is_null_before_any_usage_seen():
+    """No measurement and a measured zero are different claims — the block
+    stays null rather than reporting zeroes that look like real data."""
+    client = _make_client(lambda request: httpx.Response(200, json={}))
+    assert client.get("/stats").json()["upstream"] is None
+
+
+def test_provider_without_cache_accounting_reports_null_cache_fields():
+    """OpenAI-compatible providers that don't expose prefix-cache figures
+    still contribute prompt/completion totals — the cache fields stay null
+    instead of being reported as a 0% hit rate."""
+    client = _make_client(
+        lambda request: _usage_response({"prompt_tokens": 80, "completion_tokens": 20})
+    )
+    client.post("/v1/chat/completions", json=_sample_body())
+
+    upstream = client.get("/stats").json()["upstream"]
+    assert upstream["prompt_tokens_total"] == 80
+    assert upstream["cache_hit_tokens_total"] is None
+    assert upstream["cache_hit_pct"] is None
+
+
+def test_response_without_usage_is_passed_through_unaffected():
+    client = _make_client(lambda request: _usage_response(None))
+    resp = client.post("/v1/chat/completions", json=_sample_body())
+
+    assert resp.status_code == 200
+    assert resp.json()["choices"][0]["message"]["content"] == "ok"
+    assert client.get("/stats").json()["upstream"] is None
+
+
+def test_non_json_error_page_does_not_break_usage_capture():
+    """A CDN/gateway error page is the exact case the raw-passthrough
+    design exists for — usage capture must not reintroduce a parse that
+    turns it into a proxy-side 500."""
+    client = _make_client(
+        lambda request: httpx.Response(
+            502, html="<html><body>Bad Gateway</body></html>"
+        )
+    )
+    resp = client.post("/v1/chat/completions", json=_sample_body())
+
+    assert resp.status_code == 502
+    assert "Bad Gateway" in resp.text
+    assert client.get("/stats").json()["upstream"] is None
+
+
+def test_malformed_json_body_claiming_json_content_type_is_tolerated():
+    client = _make_client(
+        lambda request: httpx.Response(
+            200,
+            content=b"{not valid json",
+            headers={"content-type": "application/json"},
+        )
+    )
+    resp = client.post("/v1/chat/completions", json=_sample_body())
+
+    assert resp.status_code == 200
+    assert resp.content == b"{not valid json"
+    assert client.get("/stats").json()["upstream"] is None
+
+
+def test_usage_with_unexpected_field_types_is_ignored_not_fatal():
+    """Some OpenAI-compatible gateways return floats or nulls here. A
+    wrong number is worse than a missing one when these figures are the
+    evidence behind the cache claim, so unparseable fields are dropped."""
+    client = _make_client(
+        lambda request: _usage_response(
+            {
+                "prompt_tokens": 40.0,
+                "completion_tokens": None,
+                "prompt_cache_hit_tokens": "lots",
+            }
+        )
+    )
+    resp = client.post("/v1/chat/completions", json=_sample_body())
+
+    assert resp.status_code == 200
+    upstream = client.get("/stats").json()["upstream"]
+    assert upstream["prompt_tokens_total"] == 40
+    assert upstream["completion_tokens_total"] == 0
+    assert upstream["cache_hit_tokens_total"] is None
+
+
+def test_estimated_stats_still_reported_alongside_upstream():
+    """The estimate isn't replaced by the real figures — both are useful:
+    the estimate covers the compression delta (before/after, which the
+    provider never sees), the upstream block covers what was actually
+    billed."""
+    client = _make_client(
+        lambda request: _usage_response({"prompt_tokens": 999, "completion_tokens": 1})
+    )
+    client.post("/v1/chat/completions", json=_sample_body())
+
+    summary = client.get("/stats").json()
+    assert summary["request_count"] == 1
+    assert summary["tokens_before_total"] > 0
+    assert summary["tokens_after_total"] > 0
+    assert summary["upstream"]["prompt_tokens_total"] == 999

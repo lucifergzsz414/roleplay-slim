@@ -60,6 +60,52 @@ def _bearer_token(auth_header: str | None) -> str:
     return auth_header.strip()
 
 
+def _record_upstream_usage(stats: CompressionStats, resp: httpx.Response) -> None:
+    """Pull the provider-reported `usage` block out of a completed upstream
+    response and hand it to stats.
+
+    Why this matters: everything else in /stats is an *estimate* produced
+    by running an OpenAI tokenizer over text destined for some other
+    provider. The response body already carries the provider's own
+    accounting — including, on DeepSeek, prompt_cache_hit_tokens, which is
+    the only direct evidence that leaving the prefix byte-identical
+    actually preserves the upstream prefix cache. That's this project's
+    central claim, so it should be measured rather than asserted.
+
+    Strictly best-effort and side-effect-free with respect to the response:
+    the body is already fully in memory (a non-streaming httpx response),
+    so reading it here does not disturb the passthrough that follows. Any
+    failure is swallowed — telemetry must never turn a successful upstream
+    call into a proxy error.
+    """
+    if resp.status_code != 200:
+        return
+    if "json" not in resp.headers.get("content-type", "").lower():
+        return
+    try:
+        payload = resp.json()
+    except Exception:
+        # A 200 that claims JSON but isn't parseable is the upstream's
+        # problem, not ours — the raw bytes still get passed through to
+        # the caller untouched.
+        return
+    if not isinstance(payload, dict):
+        return
+    try:
+        recorded = stats.record_usage(payload.get("usage"))
+    except Exception:  # pragma: no cover - record_usage is already total
+        logger.exception("failed to record upstream usage")
+        return
+    if recorded:
+        logger.info(
+            "upstream usage | prompt:%s completion:%s cache_hit:%s cache_miss:%s",
+            recorded["prompt_tokens"],
+            recorded["completion_tokens"],
+            recorded["prompt_cache_hit_tokens"],
+            recorded["prompt_cache_miss_tokens"],
+        )
+
+
 def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
     """transport lets tests substitute an httpx.MockTransport for the real
     network call, so the proxy's own request/response handling (headers,
@@ -223,6 +269,7 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                 return JSONResponse(
                     {"error": {"message": f"upstream request failed: {e}"}}, status_code=502
                 )
+            _record_upstream_usage(stats, resp)
             # Pass through the raw upstream response — JSON, HTML error
             # page, plain text, or empty body — rather than assuming JSON
             # and crashing on the first CDN/gateway error page that isn't.
