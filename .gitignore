@@ -8,3 +8,11 @@ dist/
 build/
 .env
 .claude/
+
+# Root-level log files (logs live in 小睦项目日志/)
+*log*.md
+readme-polish-round3-log.md
+
+# Personal utility scripts (deleted, prevent re-add)
+_r.py
+_read_img.py
