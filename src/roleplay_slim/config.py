@@ -10,6 +10,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -58,8 +59,33 @@ class CompressorConfig:
     # enable_history_window is on: "drop" removes them outright (appropriate
     # for apps that already inject a
     # separate persistent-memory summary elsewhere); "trim" keeps a short
-    # extractive stub (first + last sentence) instead of dropping entirely.
-    history_window_mode: str = "trim"  # "trim" | "drop"
+    # extractive stub (first + last sentence) instead of dropping entirely;
+    # "summarize" hands them to the `summarizer` callback below and replaces
+    # the whole block with its single returned message.
+    history_window_mode: str = "trim"  # "trim" | "drop" | "summarize"
+
+    # Optional callback that condenses the aged-out portion of the history.
+    # Receives the messages of every turn older than keep_recent_turns and
+    # returns one string, which replaces that entire block as a single
+    # system message. Only consulted when history_window_mode ==
+    # "summarize".
+    #
+    # This is the library's one deliberate escape hatch from being purely
+    # rule-based. The rules here are cheap and predictable but blunt — the
+    # extractive "trim" keeps the first and last sentence and does nothing
+    # at all to text with no sentence-ending punctuation, which is most
+    # short chat lines. Rather than take on an ML dependency and start
+    # rewriting characters' dialogue, the caller supplies the condensing:
+    # apps in this space usually already have a memory/summary layer whose
+    # output is far better than anything a regex could produce.
+    #
+    # Python-only by nature (a callable cannot come from TOML). Returning
+    # an empty string means "this history isn't worth keeping" and drops
+    # the block. Raising is survivable: the failure is logged and the
+    # block falls back to "trim" — this callback is usually a network call
+    # to an LLM, and a proxy handling a live request must not fail just
+    # because the summarizer timed out.
+    summarizer: Callable[[list[dict]], str] | None = None
 
     # Regex describing how this app wraps stage directions / action
     # descriptions. Either a raw regex string (e.g. r"（[^）]*）") or the
@@ -119,9 +145,16 @@ class CompressorConfig:
     def __post_init__(self) -> None:
         if self.keep_recent_turns < 0:
             raise ValueError(f"keep_recent_turns must be >= 0, got {self.keep_recent_turns}")
-        if self.history_window_mode not in ("trim", "drop"):
+        if self.history_window_mode not in ("trim", "drop", "summarize"):
             raise ValueError(
-                f'history_window_mode must be "trim" or "drop", got {self.history_window_mode!r}'
+                'history_window_mode must be "trim", "drop" or "summarize", '
+                f"got {self.history_window_mode!r}"
+            )
+        if self.history_window_mode == "summarize" and self.summarizer is None:
+            raise ValueError(
+                'history_window_mode="summarize" requires a summarizer callable. '
+                "It cannot be set from TOML — construct CompressorConfig in Python "
+                "and pass summarizer=<your function>, or choose another mode."
             )
         if self.prefix_override is not None and self.prefix_override < 0:
             raise ValueError(f"prefix_override must be >= 0 or None, got {self.prefix_override}")
@@ -163,6 +196,17 @@ class CompressorConfig:
     def from_dict(cls, data: dict) -> "CompressorConfig":
         section = data.get("compressor", data)
         known = {f.name for f in cls.__dataclass_fields__.values()}
+        # summarizer is a valid field name but not a valid *config-file*
+        # key: TOML can only produce data, never a callable, so a value
+        # here would sail through the name filter below and then fail at
+        # call time deep inside compression. Reject it up front with an
+        # explanation instead.
+        if "summarizer" in section:
+            raise ValueError(
+                "summarizer cannot be set from a config file — it is a Python "
+                "callable. Load this config, then assign it: "
+                "config.summarizer = my_function"
+            )
         kwargs = {k: v for k, v in section.items() if k in known}
         unknown = set(section) - known
         if unknown:

@@ -8,10 +8,13 @@ reason about (a bad regex either matches too much or too little; it never
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from .config import CompressorConfig
-from .segmenter import Turn
+from .segmenter import Message, Turn
+
+logger = logging.getLogger("roleplay_slim")
 
 _WHITESPACE_RUN_RE = re.compile(r"\n{3,}")
 _TRAILING_WS_RE = re.compile(r"[ \t]+\n")
@@ -112,6 +115,55 @@ def _extractive_trim(text: str) -> str:
     return trimmed if len(trimmed) < len(text) else text
 
 
+def _summarize_old_turns(old_turns: list[Turn], config: CompressorConfig) -> list[Turn] | None:
+    """Replace the aged-out turns with a single system message produced by
+    config.summarizer.
+
+    Returns the replacement turns, or None if the callback failed and the
+    caller should fall back to extractive trimming. An empty return from
+    the callback means "this history isn't worth keeping" and yields an
+    empty list — the block is dropped.
+
+    The callback is user code and typically a network call to an LLM. It
+    gets to fail: a proxy serving a live request must not return an error
+    because summarization timed out, so any exception is logged and
+    downgraded to the trim path.
+    """
+    summarizer = config.summarizer
+    if summarizer is None:  # pragma: no cover - guarded by config validation
+        return None
+    if not old_turns:
+        # Nothing aged out yet — don't spend an LLM call to summarize
+        # nothing.
+        return []
+
+    old_messages: list[Message] = []
+    for turn in old_turns:
+        old_messages.extend(turn.messages)
+
+    try:
+        summary = summarizer(old_messages)
+    except Exception:
+        logger.exception(
+            "summarizer raised while condensing %d aged-out message(s); "
+            "falling back to extractive trim for this request",
+            len(old_messages),
+        )
+        return None
+
+    if summary is None or not isinstance(summary, str):
+        logger.warning(
+            "summarizer returned %s, expected str; falling back to extractive trim",
+            type(summary).__name__,
+        )
+        return None
+
+    summary = summary.strip()
+    if not summary:
+        return []
+    return [Turn([{"role": "system", "content": summary}])]
+
+
 def history_window(turns: list[Turn], config: CompressorConfig) -> list[Turn]:
     """Leave the most recent `keep_recent_turns` turns untouched. Older
     turns are dropped or trimmed depending on config.history_window_mode."""
@@ -124,6 +176,13 @@ def history_window(turns: list[Turn], config: CompressorConfig) -> list[Turn]:
 
     if config.history_window_mode == "drop":
         return recent_turns
+
+    if config.history_window_mode == "summarize":
+        summarized = _summarize_old_turns(old_turns, config)
+        # None signals the callback failed — fall through to the extractive
+        # trim below rather than losing the history entirely.
+        if summarized is not None:
+            return summarized + recent_turns
 
     trimmed: list[Turn] = []
     for turn in old_turns:
