@@ -1,8 +1,11 @@
 """Top-level entry point: compress(messages, config) -> messages."""
 from __future__ import annotations
 
+import logging
+
 from .config import CompressorConfig
 from .segmenter import Turn, segment
+from .stats import estimate_messages_tokens
 from .strategies import (
     content_key,
     dedupe_verbatim_tail,
@@ -12,12 +15,60 @@ from .strategies import (
     whitespace_normalize,
 )
 
+logger = logging.getLogger("roleplay_slim")
+
 
 def _turns_to_messages(turns: list[Turn]) -> list[dict]:
     out: list[dict] = []
     for turn in turns:
         out.extend(turn.messages)
     return out
+
+
+def _enforce_token_budget(
+    prefix: list[dict], turns: list[Turn], config: CompressorConfig
+) -> list[Turn]:
+    """Drop the oldest turns until the estimated prompt fits
+    config.max_prompt_tokens.
+
+    Whole turns are dropped rather than individual messages. A turn is cut
+    at each new user message, so an assistant tool_calls message and the
+    tool results answering it always live inside the same turn — dropping
+    per-message could strand a tool_calls block with no matching results,
+    which providers reject outright.
+
+    Two things are never sacrificed to the budget: the cache-stable prefix
+    (the entire premise of this library) and the most recent
+    budget_min_recent_turns turns (dropping the pending question deletes
+    the request itself). A budget too small to fit those is reported and
+    left unmet — returning a structurally broken prompt would be a worse
+    outcome than returning an honest oversized one.
+    """
+    budget = config.max_prompt_tokens
+    if budget is None:
+        return turns
+
+    floor = max(1, config.budget_min_recent_turns)
+    prefix_tokens = estimate_messages_tokens(prefix)
+
+    while len(turns) > floor:
+        if prefix_tokens + estimate_messages_tokens(_turns_to_messages(turns)) <= budget:
+            return turns
+        turns = turns[1:]
+
+    total = prefix_tokens + estimate_messages_tokens(_turns_to_messages(turns))
+    if total > budget:
+        logger.warning(
+            "max_prompt_tokens=%d could not be met: ~%d tokens remain after dropping "
+            "history down to the last %d turn(s) (prefix alone is ~%d). The prefix and "
+            "the most recent turns are never dropped — raise the budget, or shorten the "
+            "prefix if it is the bulk of it.",
+            budget,
+            total,
+            len(turns),
+            prefix_tokens,
+        )
+    return turns
 
 
 def _find_recurring_system_texts(turns: list[Turn]) -> dict[str, dict]:
@@ -99,6 +150,13 @@ def compress(messages: list[dict], config: CompressorConfig | None = None) -> li
 
     if config.enable_strip_stage_directions:
         turns = strip_stage_directions(turns, config, keep_recent=config.keep_recent_turns)
+
+    # Runs last among the turn-level passes, so it measures what the other
+    # strategies actually produced rather than guessing ahead of them — and
+    # deliberately *before* the recurring-system re-attachment below, so a
+    # mandatory format instruction that budget pruning just removed still
+    # gets restored (the same failure mode history_window hit on 2026-07-25).
+    turns = _enforce_token_budget(prefix, turns, config)
 
     dynamic = _turns_to_messages(turns)
 

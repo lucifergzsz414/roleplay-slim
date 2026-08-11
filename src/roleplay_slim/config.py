@@ -68,6 +68,30 @@ class CompressorConfig:
     # enable_strip_stage_directions is True.
     stage_direction_pattern: str = "fullwidth_parens"
 
+    # Optional hard ceiling on the estimated token count of the whole
+    # compressed prompt. None (the default) leaves budgeting off entirely,
+    # so existing configs behave byte-for-byte as before.
+    #
+    # Why this exists: every other setting here is *structural* — "keep the
+    # last 6 turns" says nothing about how big those turns are. A history
+    # of 200 long turns trimmed to first+last sentence each is still an
+    # enormous prompt, and trimming does nothing at all to messages with no
+    # sentence-ending punctuation (short chat lines like "ok" / "在吗").
+    # Without a budget, the compressed output has no upper bound. With one,
+    # the oldest turns are dropped outright until the estimate fits.
+    #
+    # Enforced on a best-effort basis: the cache-stable prefix is never
+    # touched and the most recent budget_min_recent_turns turns are never
+    # dropped, so a budget smaller than those two combined is logged as a
+    # warning and left unmet rather than honoured by breaking the prompt.
+    max_prompt_tokens: int | None = None
+
+    # Floor for budget enforcement: however far over budget the prompt is,
+    # at least this many of the most recent turns always survive. Dropping
+    # the final turn would delete the very question being asked, which is
+    # never a useful way to save tokens.
+    budget_min_recent_turns: int = 1
+
     # Override the auto-detected prefix length (see segmenter.detect_prefix).
     # None means "auto-detect: all leading system messages before the first
     # user/assistant message". Set an explicit int only when the app's
@@ -101,6 +125,15 @@ class CompressorConfig:
             )
         if self.prefix_override is not None and self.prefix_override < 0:
             raise ValueError(f"prefix_override must be >= 0 or None, got {self.prefix_override}")
+        if self.max_prompt_tokens is not None and self.max_prompt_tokens <= 0:
+            raise ValueError(
+                f"max_prompt_tokens must be > 0 or None, got {self.max_prompt_tokens}"
+            )
+        if self.budget_min_recent_turns < 1:
+            raise ValueError(
+                "budget_min_recent_turns must be >= 1 (dropping the final turn would "
+                f"delete the question being asked), got {self.budget_min_recent_turns}"
+            )
         if not (1 <= self.prefix_timestamp_bucket_minutes <= 60):
             raise ValueError(
                 "prefix_timestamp_bucket_minutes must be between 1 and 60, "
