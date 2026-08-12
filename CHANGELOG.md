@@ -8,7 +8,14 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ## [Unreleased]
 
-(Nothing yet.)
+### Fixed
+
+- The sdist shipped files that have nothing to do with this project. Only the wheel had
+  an explicit file list, so hatchling built the sdist by sweeping in everything the
+  `.gitignore` didn't happen to exclude — which in 0.3.1 meant a few unrelated local
+  installer scripts and the whole `.hypothesis` test cache. The sdist now has its own
+  allowlist, so a stray file in the working tree can't ship by accident. No published
+  release ever contained credentials; this is a packaging-hygiene fix.
 
 ## [0.3.1] — 2026-08-12
 

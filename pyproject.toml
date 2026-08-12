@@ -39,6 +39,28 @@ roleplay-slim-proxy = "roleplay_slim.proxy.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/roleplay_slim"]
 
+# Without an explicit list, hatchling sweeps everything the .gitignore
+# doesn't exclude into the sdist — which is how unrelated local scripts and
+# the .hypothesis test cache ended up published in 0.3.1. Allowlist, not
+# denylist: a new stray file in the working tree should not ship by default.
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "tests/",
+    "examples/",
+    "benchmark/",
+    "docs/",
+    ".github/workflows/",
+    "README.md",
+    "README_CN.md",
+    "QUICKSTART.md",
+    "QUICKSTART_CN.md",
+    "CHANGELOG.md",
+    "gotchas.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
 [tool.mypy]
 python_version = "3.10"
 packages = ["roleplay_slim"]
