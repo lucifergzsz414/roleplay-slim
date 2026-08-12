@@ -10,6 +10,18 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 (Nothing yet.)
 
+## [0.3.1] — 2026-08-12
+
+### Fixed
+
+- `roleplay_slim.__version__` reported `0.1.0` on every release since 0.1.0 — it was a
+  hand-written literal that nobody bumped, so it silently disagreed with the version
+  recorded in the package metadata. Anything that introspected the installed version
+  (a deployment check, a bug report, a `/stats` banner) got a two-releases-stale answer.
+  It now tracks the installed distribution metadata via `importlib.metadata`, so there is
+  no second place to forget. A test asserts the two agree, which is the part that keeps
+  this fixed.
+
 ## [0.3.0] — 2026-08-11
 
 ### Added
