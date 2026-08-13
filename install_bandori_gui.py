@@ -25,9 +25,7 @@ else:
     _base = Path(__file__).resolve().parent
     _bundle_dir = _base
 
-# patch_bandori.py sits alongside this file. When frozen it lands at the
-# bundle root, so _bundle_dir covers both cases without a subdirectory.
-sys.path.insert(0, str(_bundle_dir))
+sys.path.insert(0, str(_bundle_dir / "installer_bandori"))
 
 from patch_bandori import (  # noqa: E402
     BACKUP_SUFFIX,
