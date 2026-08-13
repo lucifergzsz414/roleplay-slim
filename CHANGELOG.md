@@ -10,12 +10,20 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ### Fixed
 
-- The sdist shipped files that have nothing to do with this project. Only the wheel had
-  an explicit file list, so hatchling built the sdist by sweeping in everything the
-  `.gitignore` didn't happen to exclude — which in 0.3.1 meant a few unrelated local
-  installer scripts and the whole `.hypothesis` test cache. The sdist now has its own
-  allowlist, so a stray file in the working tree can't ship by accident. No published
-  release ever contained credentials; this is a packaging-hygiene fix.
+- The sdist shipped whatever happened to be sitting in the working tree. Only the wheel
+  had an explicit file list, so hatchling built the sdist by sweeping in everything the
+  `.gitignore` didn't happen to exclude — which in 0.3.1 meant the desktop-pet GUI
+  installer (a side utility, not part of the package) and the whole `.hypothesis` test
+  cache. The sdist now has its own allowlist, so a stray file can't ship by accident.
+  No published release ever contained credentials; this is a packaging-hygiene fix.
+
+### Added
+
+- README: the prefix is never compressed by design, so its share of the prompt is a hard
+  ceiling on what compression can reach — worth checking with `preview` before judging
+  the savings you get. Also documented that `cl100k_base` overcounts CJK text relative to
+  what providers with their own tokenizers bill, which inflates the absolute figures in
+  `/stats` (the ratio survives; the absolute numbers don't).
 
 ## [0.3.1] — 2026-08-12
 

@@ -339,6 +339,13 @@ extra 那么夸张）。
 做什么——`trim` 到底动不动得了你的消息、你的前缀已经占了多大比例、预算会丢掉
 哪几轮。所以开启之前先看一眼：
 
+**前缀占比决定了压缩的天花板。** 前缀按设计永不压缩，那么它在 prompt 里占多大
+比例，就有多大比例是压缩碰不到的。人设很长、近期历史很短的应用，剩下可压的内容
+本就寥寥，再怎么调参也变不出来；前缀短、身后堆了几百轮对话的应用，则几乎全部可
+压。上面那组 benchmark 数字来自后一种形态。在评判自己拿到的数字之前，先确认自己
+属于哪一种——`preview` 会直接报出前缀占比（下面输出里的 `~73 tokens (17% of the
+prompt)`）。
+
 ```bash
 roleplay-slim preview conversation.json --keep-recent-turns 2
 ```
@@ -492,6 +499,13 @@ roleplay-slim-proxy --config examples/example_config.toml
 
 两组数据互补，谁也替代不了谁：估算值覆盖压缩前后的差值（服务商根本看不到
 未压缩的版本），`upstream` 块覆盖你实际被计费的量。
+
+**不要把 `savings_pct` 当成成本数字来读。** `cl100k_base` 是 OpenAI 的分词器，
+在中日韩文本上数出来的 token 明显多于自带分词器的服务商实际计费的量——拿
+DeepSeek 上报的 `prompt_tokens` 对照，本地估算在中文对话上高出五成有余。
+`tokens_before_total` 和 `tokens_after_total` 被同一个系数放大，所以*比值*仍然
+有意义；绝对数值、以及任何据此折算出来的钱，都不成立。凡是你在意准不准的判断，
+以 `upstream` 块为准。
 
 没有采到样本之前该块是 `null` 而不是一排 0——"没测量"和"测到 0"是两回事。
 不报告缓存明细的服务商（OpenAI 就是）其 `cache_*` 字段保持 `null`，而不是

@@ -392,6 +392,16 @@ tells you what it will do to *your* conversations — whether `trim` touches
 your messages at all, how much of the prompt your prefix already occupies,
 which turns a budget would drop. So look before you switch it on:
 
+**Your prefix share sets the ceiling.** The prefix is never compressed, by
+design — so whatever fraction of your prompt it occupies is a fraction
+compression can't touch. An app with a long persona and a short recent
+history has very little compressible content left, and no amount of tuning
+will change that; an app with a short prefix and hundreds of turns behind it
+has almost all of it available. The benchmark figures above come from the
+second shape. Before you judge the numbers you get, check which shape you
+have — `preview` reports the prefix share directly (`~73 tokens (17% of the
+prompt)` in the output below).
+
 ```bash
 roleplay-slim preview conversation.json --keep-recent-turns 2
 ```
@@ -557,6 +567,16 @@ Both sets of figures are useful and neither replaces the other: the
 estimate covers the compression delta (the provider never sees the
 uncompressed version), the `upstream` block covers what you were actually
 billed for.
+
+**Don't read `savings_pct` as a cost figure.** `cl100k_base` is OpenAI's
+tokenizer, and on CJK text it counts substantially more tokens than
+providers with their own tokenizers actually bill — measured against
+DeepSeek's reported `prompt_tokens`, the local estimate ran well over 50%
+high on Chinese dialogue. Both `tokens_before_total` and
+`tokens_after_total` are inflated by roughly the same factor, so the
+*ratio* stays meaningful; the absolute numbers, and any money you try to
+derive from them, do not. Use the `upstream` block for anything you care
+about being right.
 
 The block is `null` until something has been measured, rather than a row
 of zeroes — "not measured" and "measured zero" are different claims.
