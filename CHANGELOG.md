@@ -8,6 +8,13 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-08-13
+
+No functional change. 0.3.1's source distribution shipped files that were never
+meant to be in it; this release is the same code, packaged correctly. PyPI does
+not allow replacing the files of a published release, so the fix has to arrive
+as a new version — pull this one instead of 0.3.1.
+
 ### Fixed
 
 - The sdist shipped whatever happened to be sitting in the working tree. Only the wheel
