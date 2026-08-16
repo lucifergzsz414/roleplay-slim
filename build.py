@@ -299,6 +299,12 @@ def main() -> None:
         if not installer.is_file() or not uninstaller.is_file() or not proxy.is_file():
             print("[X] All three .exe files must exist to package zip. Build them first.")
             sys.exit(1)
+        if not README_SRC.is_file():
+            print(f"[X] {README_SRC.name} is missing — it is private pet-distribution content, "
+                  "not part of the open-source repo.")
+            print("    Restore it from git history "
+                  "(git show 8cb03b3^:使用说明.txt > 使用说明.txt) or provide your private copy.")
+            sys.exit(1)
         package_zip(ZIP_NAME, [installer, uninstaller, proxy], README_SRC)
 
     if do_bandori_zip:
@@ -310,6 +316,11 @@ def main() -> None:
             proxy = DIST / PROXY_EXE_NAME
         if not bandori_installer.is_file() or not bandori_uninstaller.is_file() or not proxy.is_file():
             print("[X] BandoriPet installer/uninstaller + proxy exe must all exist to package zip.")
+            sys.exit(1)
+        if not BANDORI_README_SRC.is_file():
+            print(f"[X] {BANDORI_README_SRC.name} is missing — private pet-distribution content, "
+                  "not part of the open-source repo.")
+            print("    Restore it from git history or provide your private copy.")
             sys.exit(1)
         package_zip(BANDORI_ZIP_NAME, [bandori_installer, bandori_uninstaller, proxy], BANDORI_README_SRC)
 
