@@ -6,7 +6,48 @@ follows [Semantic Versioning](https://semver.org/) — while the major
 version is `0`, breaking changes may still land in a minor release (per
 semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
-## [Unreleased]
+## [0.4.0] — 2026-08-16
+
+### Added
+
+- **`optimize` CLI command + `roleplay_slim.optimizer`**: cross-request prefix
+  optimization. Given a batch of captured requests, reports which leading
+  message positions are stable across requests (appearing in ≥90% of samples
+  AND byte-identical when present) and the longest leading stable run as the
+  recommended prefix, with a cache-hit-ceiling estimate before/after
+  hoisting. The tool never touches your config.
+- **`/stats` persistence**: the proxy's `/stats` now answers from a SQLite
+  store instead of an in-memory object, so the numbers survive restarts.
+  Configurable via `[stats] persist` (default `true`) and `db_path`;
+  `persist = false` falls back to a pure in-memory accumulator with identical
+  output.
+- **Multi-client-token auth**: `client_auth_tokens_extra` — a comma-separated
+  list of additional client credentials the proxy accepts alongside
+  `client_auth_token_env`, so more than one caller can authenticate against a
+  single instance. All credentials compared with `secrets.compare_digest`;
+  the gate stays fail-closed and never forwards proxy credentials upstream.
+- **Synthetic fidelity benchmark** (`benchmark/corpus_gen.py` +
+  `benchmark/run_fidelity.py`): seeded generator planting verifiable facts in
+  the dynamic region, measuring token savings AND fact retention — the
+  publishable evidence that compression doesn't lose persona memory.
+- CI: ruff lint (explicit rule set) + a packaging gate
+  (`scripts/check_sdist.py`) that fails if any file ships outside the sdist
+  allowlist — it caught two real leaks on first run.
+- Design docs for the roadmap (`docs/designs/`).
+
+### Fixed
+
+- Bare `mypy` invocation broke on mypy 2.x (which no longer honours the
+  `packages` config key as a default target); CI now passes `mypy src`.
+- Tests importing the `benchmark` package failed under the `pytest` console
+  script (no CWD on `sys.path`); a root `conftest.py` fixes it.
+- `build.py` now fails with an actionable message when the private pet
+  `使用说明*.txt` manuals are absent, instead of a raw `FileNotFoundError`.
+
+### Removed
+
+- The desktop-pet `使用说明*.txt` manuals were removed from the public repo
+  (they are private distribution content, not part of the library).
 
 ## [0.3.2] — 2026-08-13
 
