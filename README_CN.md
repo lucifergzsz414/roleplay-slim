@@ -6,6 +6,12 @@
 面向持久化 AI 角色的轻量级上下文优化层——既是库，也是一个兼容 OpenAI Chat Completions
 的代理。它知道 **缓存稳定的 persona 前缀**和**每次请求都要付费的对话历史**之间的区别。
 
+> **并不只适用于角色扮演。** 它保护的结构——稳定前缀 + 每次请求都在变的对话——是
+> 大多数聊天类应用共享的形态，即使前缀不是 persona：代码助手的 system prompt、
+> RAG 聊天机器人的常驻指令、客服 bot 的护栏。roleplay-slim 在持久化角色 bot 上
+> 经受过实战检验，而前缀保护的好处适用于任何存在这种形态的地方。角色扮演是它被
+> 证明过的地方，不是它的边界。
+
 [![CI](https://github.com/lucifergzsz414/roleplay-slim/actions/workflows/ci.yml/badge.svg)](https://github.com/lucifergzsz414/roleplay-slim/actions)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)

@@ -20,7 +20,7 @@ needed — just run it and see compression in action:
     python examples/deepseek_example.py
 """
 
-from roleplay_slim import compress, CompressorConfig
+from roleplay_slim import CompressorConfig, compress
 
 # ---------------------------------------------------------------------------
 # Config — matching a typical QQ bot's message structure

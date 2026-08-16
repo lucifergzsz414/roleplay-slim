@@ -1,14 +1,15 @@
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
 from .compressor import compress
 from .config import CompressorConfig, ProxyConfig
 from .stats import CompressionStats, estimate_messages_tokens, estimate_tokens
 
 __all__ = [
-    "compress",
+    "CompressionStats",
     "CompressorConfig",
     "ProxyConfig",
-    "CompressionStats",
+    "compress",
     "estimate_messages_tokens",
     "estimate_tokens",
 ]

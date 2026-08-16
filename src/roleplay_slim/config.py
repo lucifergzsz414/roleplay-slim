@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -187,13 +187,13 @@ class CompressorConfig:
         self._compiled_stage_direction_pattern = compiled
 
     @classmethod
-    def from_toml(cls, path: str | Path) -> "CompressorConfig":
+    def from_toml(cls, path: str | Path) -> CompressorConfig:
         with open(path, "rb") as f:
             data = tomllib.load(f)
         return cls.from_dict(data)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "CompressorConfig":
+    def from_dict(cls, data: dict) -> CompressorConfig:
         section = data.get("compressor", data)
         known = {f.name for f in cls.__dataclass_fields__.values()}
         # summarizer is a valid field name but not a valid *config-file*
@@ -236,7 +236,7 @@ class ProxyConfig:
     client_auth_token_env: str = ""
 
     @classmethod
-    def from_toml(cls, path: str | Path) -> "ProxyConfig":
+    def from_toml(cls, path: str | Path) -> ProxyConfig:
         with open(path, "rb") as f:
             data = tomllib.load(f)
         proxy_section = data.get("proxy", {})

@@ -8,6 +8,14 @@ a library and an OpenAI Chat Completions-compatible proxy that knows the differe
 **cache-stable persona prefix** and the **dialogue history you pay for on
 every request**.
 
+> **Not only for roleplay.** The structure it protects — a stable prefix vs.
+> the dialogue that changes every request — is a shape most chat apps share,
+> even when the prefix isn't a persona: a code assistant's system prompt, a
+> RAG chatbot's standing instructions, a customer-service bot's guardrails.
+> roleplay-slim was battle-tested on a persistent-character bot, and the
+> prefix-preservation benefit applies wherever that shape exists. Roleplay
+> is where it's proven, not where it stops.
+
 [![CI](https://github.com/lucifergzsz414/roleplay-slim/actions/workflows/ci.yml/badge.svg)](https://github.com/lucifergzsz414/roleplay-slim/actions)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)

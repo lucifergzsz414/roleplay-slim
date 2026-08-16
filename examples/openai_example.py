@@ -4,7 +4,7 @@ messages, and print the result.
 Run with any OpenAI-compatible client by swapping base_url — no code
 changes needed beyond the HTTP layer."""
 
-from roleplay_slim import compress, CompressorConfig
+from roleplay_slim import CompressorConfig, compress
 
 messages = [
     {"role": "system", "content": "You are a helpful assistant."},

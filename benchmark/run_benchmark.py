@@ -4,7 +4,7 @@ on synthetic roleplay conversations at 50, 200, and 500 turns.
 Generates numbers suitable for a README table — no real user data,
 no external dependencies beyond roleplay-slim itself."""
 
-from roleplay_slim import compress, CompressorConfig
+from roleplay_slim import CompressorConfig, compress
 from roleplay_slim.stats import estimate_messages_tokens
 
 PERSONA = "You are Aria, a shy guitarist. Stay in character. " * 20

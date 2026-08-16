@@ -22,7 +22,7 @@ Run this file directly for a dry-run demo (no API key required):
     python examples/sillytavern_adapter.py
 """
 
-from roleplay_slim import compress, CompressorConfig
+from roleplay_slim import CompressorConfig, compress
 
 # ---------------------------------------------------------------------------
 # SillyTavern-style character card (simplified)

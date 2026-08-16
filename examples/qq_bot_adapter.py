@@ -54,7 +54,7 @@ production QQ bot's message structure."""
 # on a QQ-bot-style message array without a real bot
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    from roleplay_slim import compress, CompressorConfig
+    from roleplay_slim import CompressorConfig, compress
 
     # Simulate a realistic QQ bot message array:
     #   [0] persona, [1] shared block, then user/assistant turns with
@@ -72,7 +72,7 @@ if __name__ == "__main__":
 
     for i in range(10):
         messages.append({"role": "user", "content": f"（第{i+1}轮用户消息）今天排练怎么样？"})
-        messages.append({"role": "assistant", "content": f"（拨了一下琴弦）还行……有个和弦一直弹不好。"})
+        messages.append({"role": "assistant", "content": "（拨了一下琴弦）还行……有个和弦一直弹不好。"})
         messages.append({"role": "system", "content": "[格式规则] 回复末尾加心情标签。"})
 
     config = CompressorConfig(

@@ -1,6 +1,6 @@
 import pytest
 
-from roleplay_slim.config import CompressorConfig, ProxyConfig, STAGE_DIRECTION_PRESETS
+from roleplay_slim.config import STAGE_DIRECTION_PRESETS, CompressorConfig, ProxyConfig
 
 
 def test_default_config_constructs_without_error():

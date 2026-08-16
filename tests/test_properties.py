@@ -9,7 +9,8 @@ input, not just the specific ones we thought to write by hand.
 """
 from __future__ import annotations
 
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from roleplay_slim.compressor import compress
 from roleplay_slim.config import CompressorConfig

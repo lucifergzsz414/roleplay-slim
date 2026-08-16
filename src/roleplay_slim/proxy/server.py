@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, Request

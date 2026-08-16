@@ -11,8 +11,10 @@ This is a minimal skeleton — add your own persona, intents, and error
 handling for production use."""
 
 import os
+
 from openai import OpenAI
-from roleplay_slim import compress, CompressorConfig
+
+from roleplay_slim import CompressorConfig, compress
 
 # ---------------------------------------------------------------------------
 # Config — move these to a config file or env vars in production

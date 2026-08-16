@@ -1,5 +1,52 @@
 # roleplay-slim 踩坑记录
 
+## `hatch build` 没有输出目录参数，产物永远写进项目的 `dist/`
+
+**日期**：2026-08-16
+
+**现象**：`scripts/check_sdist.py` 想构建 sdist 到临时目录，传 `-d` 直接
+`Error: No such option: -d`。
+
+**根因**：`hatch build` 只支持 `-t/--target`、`-a/--all`、`-c/--clean` 等，
+产物一律写进项目（`pyproject.toml` 所在目录）的 `dist/`。
+
+**解决**：check_sdist.py 用「构建前把 `dist/` 里已有的 `roleplay_slim-*.tar.gz`
+备份到临时目录 → 构建 → 校验 → 恢复/清理」模式，保证 `dist/` 不被污染。
+**绝对不要用 `-c/--clean`** —— 那会删掉 `dist/` 里的端用户分发 zip
+（若叶睦/邦多利桌宠安装包），git 救不回来。
+
+## subprocess 读 `hatch build` 输出在 Windows 会 GBK 解码崩溃
+
+**日期**：2026-08-16
+
+**现象**：`subprocess.run(["hatch","build",...], capture_output=True, text=True)`
+抛 `UnicodeDecodeError: 'gbk' codec can't decode byte ...`，连 traceback 都
+出现在 reader 线程里。
+
+**根因**：`text=True` 用系统 locale（Windows 中文 = GBK）解码 hatch 的输出，
+而 hatch 的日志里有 `—`（em dash）等非 GBK 字符。
+
+**解决**：必须显式 `encoding="utf-8", errors="replace"`。所有 `subprocess.run`
+调用带 `text=True` 的都要这么写，不只在 hatch 上。
+
+## hatchling 会把 VCS 文件（`.gitignore` 等）和 `.hypothesis/` 强塞进 sdist
+
+**日期**：2026-08-16
+
+**现象**：sdist 洁净度门槛（check_sdist.py）首次运行就抓出两个白名单外的文件：
+`.gitignore` 和 `.hypothesis/.gitignore`。前者在 0.3.2 里就一直在，后者是
+0.3.1 事故「.hypothesis 测试缓存混进发布包」的残留。
+
+**根因**：hatchling 对 sdist 的 VCS 文件（`.gitignore`/`.gitattributes` 等）是
+**自动包含**，allowlist（`include`）拦不住；`.hypothesis/` 里那层 `.gitignore`
+也是被这个自动包含带进去的。allowlist 是「除了白名单都要有原因」，不是「白名单
+外的都进不来」。
+
+**解决**：`.gitignore` 在 pyproject 的 sdist `include` 里显式声明（诚实地承认它
+总是会进）；`.hypothesis/` 和 `__pycache__/` 加进 sdist `exclude` 数组，并把
+`.hypothesis/` 加进仓库 `.gitignore`。**check_sdist.py 就是为抓这种漏网之鱼写的**——
+它已经两次证明自己有用（0.3.1 同款垃圾至今还在）。
+
 ## 本仓库不能用 `python -m build`，根目录的 `build.py` 会抢走模块名
 
 **日期**：2026-08-13

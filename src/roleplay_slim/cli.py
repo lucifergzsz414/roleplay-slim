@@ -19,7 +19,7 @@ from typing import Any, TextIO
 from .compressor import compress
 from .config import CompressorConfig
 from .segmenter import segment
-from .stats import estimate_messages_tokens, estimate_tokens
+from .stats import estimate_messages_tokens
 from .strategies import content_key
 
 # Longest message body shown per line before eliding. Wide enough to
@@ -66,7 +66,7 @@ def _load_messages(source: str) -> list[dict]:
         raw = sys.stdin.read()
     else:
         try:
-            with open(source, "r", encoding="utf-8") as f:
+            with open(source, encoding="utf-8") as f:
                 raw = f.read()
         except FileNotFoundError:
             raise SystemExit(f"error: no such file: {source}")
