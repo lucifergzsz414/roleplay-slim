@@ -68,3 +68,11 @@ stage_direction_pattern = "fullwidth_parens"
 #
 # Setting `summarizer` as a key in this file is rejected with an
 # explanation rather than failing later inside compression.
+
+[stats]
+# Whether /stats survives restarts. Default true — every request is written
+# as one row in `db_path` (an SQLite file next to wherever the proxy runs),
+# so a restart doesn't zero the numbers. Set persist=false to fall back to
+# a pure in-memory accumulator (identical /stats output, nothing on disk).
+persist = true
+# db_path = "stats.db"

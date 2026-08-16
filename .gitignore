@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .hypothesis/
 .venv/
+stats.db
 venv/
 dist/
 build/

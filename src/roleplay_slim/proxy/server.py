@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from ..compressor import compress
 from ..config import ProxyConfig
-from ..stats import CompressionStats
+from .stats_store import StatsStore
 
 logger = logging.getLogger("roleplay_slim")
 
@@ -131,7 +131,7 @@ def _passthrough_response(resp: httpx.Response) -> Response:
     )
 
 
-def _record_upstream_usage(stats: CompressionStats, resp: httpx.Response) -> None:
+def _record_upstream_usage(stats: StatsStore, resp: httpx.Response) -> None:
     """Pull the provider-reported `usage` block out of a completed upstream
     response and hand it to stats.
 
@@ -182,7 +182,10 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
     network call, so the proxy's own request/response handling (headers,
     streaming passthrough, compression call-through) can be exercised
     without hitting a real upstream API."""
-    stats = CompressionStats()
+    # /stats source of truth. persist=true → SQLite file that survives
+    # restarts; persist=false → the same store over ":memory:" (identical
+    # output, nothing written to disk).
+    stats = StatsStore(":memory:" if not config.stats.persist else config.stats.db_path)
     api_key = os.environ.get(config.upstream_api_key_env, "")
     if not api_key:
         logger.warning(
@@ -212,6 +215,7 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
         async with httpx.AsyncClient(timeout=120.0, transport=transport) as client:
             app.state.client = client
             yield
+            stats.close()
 
     app = FastAPI(title="roleplay-slim proxy", lifespan=lifespan)
 

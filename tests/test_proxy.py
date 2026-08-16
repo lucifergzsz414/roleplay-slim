@@ -11,7 +11,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from roleplay_slim.config import CompressorConfig, ProxyConfig
+from roleplay_slim.config import CompressorConfig, ProxyConfig, StatsConfig
 from roleplay_slim.proxy.server import create_app
 
 FOOTER = "[FORMAT RULE] end with a tag"
@@ -32,7 +32,12 @@ def _sample_body(stream: bool = False) -> dict:
 
 
 def _make_client(handler, config: ProxyConfig | None = None) -> TestClient:
-    config = config or ProxyConfig(compressor=CompressorConfig(keep_recent_turns=1))
+    # Default to the in-memory store so these tests don't litter a stats.db
+    # into the working tree; the durability tests below opt into a real file.
+    config = config or ProxyConfig(
+        compressor=CompressorConfig(keep_recent_turns=1),
+        stats=StatsConfig(persist=False),
+    )
     app = create_app(config, transport=httpx.MockTransport(handler))
     # __enter__ (not just construction) is what actually runs the app's
     # lifespan, which is where the shared httpx.AsyncClient gets created —
@@ -774,3 +779,71 @@ def test_local_endpoints_are_not_swallowed_by_catch_all():
 
     assert client.get("/healthz").json() == {"status": "ok"}
     assert "request_count" in client.get("/stats").json()
+
+
+# --- stats persistence --------------------------------------------------
+#
+# With persist=true, /stats answers from a SQLite file, so the numbers
+# survive a proxy restart. These tests bring up two successive apps on the
+# same database file and assert the totals carry over.
+
+
+def _make_persistent_client(handler, db_path, config=None):
+    config = config or ProxyConfig(
+        compressor=CompressorConfig(keep_recent_turns=1),
+        stats=StatsConfig(persist=True, db_path=db_path),
+    )
+    app = create_app(config, transport=httpx.MockTransport(handler))
+    return TestClient(app).__enter__()
+
+
+def test_stats_survive_a_proxy_restart(tmp_path):
+    db = str(tmp_path / "stats.db")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": []})
+
+    client1 = _make_persistent_client(handler, db)
+    client1.post("/v1/chat/completions", json=_sample_body())
+    client1.post("/v1/chat/completions", json=_sample_body())
+    assert client1.get("/stats").json()["request_count"] == 2
+    client1.__exit__(None, None, None)  # runs lifespan teardown → store closed
+
+    client2 = _make_persistent_client(handler, db)
+    stats = client2.get("/stats").json()
+    client2.__exit__(None, None, None)
+    assert stats["request_count"] == 2
+    assert stats["tokens_before_total"] > 0
+
+
+def test_upstream_usage_survives_a_proxy_restart(tmp_path):
+    db = str(tmp_path / "stats2.db")
+    config = ProxyConfig(
+        compressor=CompressorConfig(keep_recent_turns=1),
+        stats=StatsConfig(persist=True, db_path=db),
+    )
+
+    def usage_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 10,
+                    "prompt_cache_hit_tokens": 40,
+                    "prompt_cache_miss_tokens": 60,
+                },
+            },
+        )
+
+    client1 = _make_persistent_client(usage_handler, db, config)
+    client1.post("/v1/chat/completions", json=_sample_body())
+    client1.__exit__(None, None, None)
+
+    client2 = _make_persistent_client(usage_handler, db, config)
+    upstream = client2.get("/stats").json()["upstream"]
+    client2.__exit__(None, None, None)
+    assert upstream["prompt_tokens_total"] == 100
+    assert upstream["cache_hit_tokens_total"] == 40
+    assert upstream["cache_hit_pct"] == 40.0

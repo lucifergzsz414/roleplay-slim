@@ -218,12 +218,39 @@ class CompressorConfig:
 
 
 @dataclass
+class StatsConfig:
+    """Whether /stats survives restarts, and where its SQLite database lives.
+
+    persist=true (the default) writes every request as a row so /stats answers
+    from disk — restart-proof, at the cost of a small stats.db next to where
+    the proxy runs. persist=false falls back to a pure in-memory accumulator
+    (identical /stats output, nothing written) for deployments that prefer
+    zero new files.
+    """
+    persist: bool = True
+    db_path: str = "stats.db"
+
+    @classmethod
+    def from_dict(cls, data: dict) -> StatsConfig:
+        section = data.get("stats", {})
+        known = {"persist", "db_path"}
+        unknown = set(section) - known
+        if unknown:
+            raise ValueError(
+                f"unknown stats config key(s): {sorted(unknown)}. "
+                f"Known keys: {sorted(known)}"
+            )
+        return cls(**{k: v for k, v in section.items() if k in known})
+
+
+@dataclass
 class ProxyConfig:
     upstream_base_url: str = "https://api.deepseek.com/v1"
     upstream_api_key_env: str = "UPSTREAM_API_KEY"
     host: str = "127.0.0.1"
     port: int = 8791
     compressor: CompressorConfig = field(default_factory=CompressorConfig)
+    stats: StatsConfig = field(default_factory=StatsConfig)
 
     # Off by default (empty string / unset env var = no access control, matching
     # prior zero-config behavior). Set this to the name of an env var holding a
@@ -241,6 +268,7 @@ class ProxyConfig:
             data = tomllib.load(f)
         proxy_section = data.get("proxy", {})
         compressor = CompressorConfig.from_dict(data)
+        stats = StatsConfig.from_dict(data)
         known = {"upstream_base_url", "upstream_api_key_env", "host", "port", "client_auth_token_env"}
         unknown = set(proxy_section) - known
         if unknown:
@@ -249,4 +277,4 @@ class ProxyConfig:
                 f"Known keys: {sorted(known)}"
             )
         kwargs = {k: v for k, v in proxy_section.items() if k in known}
-        return cls(compressor=compressor, **kwargs)
+        return cls(compressor=compressor, stats=stats, **kwargs)
