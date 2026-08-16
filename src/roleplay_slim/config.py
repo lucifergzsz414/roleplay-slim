@@ -262,6 +262,14 @@ class ProxyConfig:
     # that only gates access to the proxy itself and is never forwarded.
     client_auth_token_env: str = ""
 
+    # Additional client credentials this proxy accepts, in addition to the
+    # one in client_auth_token_env. Comma-separated, e.g. "sk-xxxx,Operit_yyyy"
+    # (entries are trimmed, empties dropped). Lets more than one caller
+    # authenticate against a single proxy instance. Same security note as
+    # client_auth_token_env: these are secrets that gate access to the proxy
+    # itself and are never forwarded upstream.
+    client_auth_tokens_extra: str = ""
+
     @classmethod
     def from_toml(cls, path: str | Path) -> ProxyConfig:
         with open(path, "rb") as f:
@@ -269,7 +277,10 @@ class ProxyConfig:
         proxy_section = data.get("proxy", {})
         compressor = CompressorConfig.from_dict(data)
         stats = StatsConfig.from_dict(data)
-        known = {"upstream_base_url", "upstream_api_key_env", "host", "port", "client_auth_token_env"}
+        known = {
+            "upstream_base_url", "upstream_api_key_env", "host", "port",
+            "client_auth_token_env", "client_auth_tokens_extra",
+        }
         unknown = set(proxy_section) - known
         if unknown:
             raise ValueError(

@@ -286,6 +286,82 @@ def test_no_client_auth_configured_is_backward_compatible():
     assert resp.status_code == 200
 
 
+# ── multi-token client auth (client_auth_tokens_extra) ───────────────────
+
+
+def _auth_client(monkeypatch, extra: str, env_token: str = ""):
+    monkeypatch.setenv("PROXY_AUTH_TEST_TOKEN", env_token)
+    config = ProxyConfig(
+        compressor=CompressorConfig(keep_recent_turns=1),
+        client_auth_token_env="PROXY_AUTH_TEST_TOKEN" if env_token else "",
+        client_auth_tokens_extra=extra,
+    )
+    return _make_client(lambda r: httpx.Response(200, json={"choices": []}), config=config)
+
+
+def test_client_auth_accepts_each_extra_token(monkeypatch):
+    client = _auth_client(monkeypatch, "sk-aaa, Operit_bbb ,sk-ccc")
+    for token in ("sk-aaa", "Operit_bbb", "sk-ccc"):
+        resp = client.post(
+            "/v1/chat/completions", json=_sample_body(),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, token
+
+
+def test_client_auth_rejects_token_not_in_extra(monkeypatch):
+    client = _auth_client(monkeypatch, "sk-aaa,Operit_bbb")
+    resp = client.post(
+        "/v1/chat/completions", json=_sample_body(),
+        headers={"Authorization": "Bearer sk-zzz"},
+    )
+    assert resp.status_code == 401
+
+
+def test_client_auth_extra_alone_still_gates(monkeypatch):
+    """extras configured but client_auth_token_env empty — the gate is still
+    active (fail closed), not a silent no-op."""
+    client = _auth_client(monkeypatch, "sk-aaa")
+    assert client.post(
+        "/v1/chat/completions", json=_sample_body(),
+        headers={"Authorization": "Bearer sk-aaa"},
+    ).status_code == 200
+    assert client.post(
+        "/v1/chat/completions", json=_sample_body(),
+        headers={"Authorization": "Bearer wrong"},
+    ).status_code == 401
+
+
+def test_client_auth_combines_env_and_extra(monkeypatch):
+    """The configured env token and the extras are both accepted, and the
+    proxy-access token still must not leak upstream."""
+    monkeypatch.setenv("PROXY_AUTH_TEST_TOKEN", "Operit_main")
+    monkeypatch.setenv("PROXY_UPSTREAM_KEY_TEST", "sk-real-upstream-key")
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("authorization")
+        return httpx.Response(200, json={"choices": []})
+
+    config = ProxyConfig(
+        compressor=CompressorConfig(keep_recent_turns=1),
+        client_auth_token_env="PROXY_AUTH_TEST_TOKEN",
+        client_auth_tokens_extra="sk-bot-extra",
+        upstream_api_key_env="PROXY_UPSTREAM_KEY_TEST",
+    )
+    client = _make_client(handler, config=config)
+
+    for token in ("Operit_main", "sk-bot-extra"):
+        resp = client.post(
+            "/v1/chat/completions", json=_sample_body(),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, token
+    # neither the env token nor the extra leaks upstream — the real upstream
+    # key is forwarded instead
+    assert captured["auth"] == "Bearer sk-real-upstream-key"
+
+
 # ── P0-3: request body validation ────────────────────────────────────────
 
 

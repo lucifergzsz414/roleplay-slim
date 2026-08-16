@@ -11,6 +11,15 @@ upstream_api_key_env = "UPSTREAM_API_KEY"
 host = "127.0.0.1"
 port = 8791
 
+# Optional: require callers to authenticate before the proxy spends your
+# upstream key. Set client_auth_token_env to the NAME of an env var holding
+# the shared secret (it is never forwarded upstream). Add more callers via
+# client_auth_tokens_extra — a comma-separated list of additional accepted
+# credentials, e.g. a chat bot's own key. Anyone who can reach the port and
+# presents a credential not listed here gets 401.
+# client_auth_token_env = "PROXY_AUTH_TOKEN"
+# client_auth_tokens_extra = "sk-bot-key,Operit_phone_token"
+
 [compressor]
 # Keep the last 6 turns (a "turn" = one user message + the reply that
 # answered it) completely verbatim. Roleplay apps benefit from more

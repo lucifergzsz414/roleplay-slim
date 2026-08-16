@@ -77,13 +77,11 @@ def _check_client_auth(
     skipped this would let anyone who can reach the proxy's port bill
     calls to the operator's real provider account.
     """
-    if not config.client_auth_token_env:
+    if not config.client_auth_token_env and not config.client_auth_tokens_extra:
         return None, incoming_auth
 
-    expected = f"Bearer {client_auth_token}" if client_auth_token else None
-    if not client_auth_token or not secrets.compare_digest(
-        incoming_auth or "", expected or ""
-    ):
+    allowed = _allowed_client_tokens(config, client_auth_token)
+    if not any(secrets.compare_digest(incoming_auth or "", a) for a in allowed):
         return (
             JSONResponse(
                 {"error": {"message": "invalid or missing proxy credentials"}},
@@ -92,6 +90,25 @@ def _check_client_auth(
             None,
         )
     return None, None
+
+
+def _allowed_client_tokens(config: ProxyConfig, client_auth_token: str) -> set[str]:
+    """The complete set of client credentials this proxy accepts.
+
+    The single configured ``client_auth_token_env`` value plus every entry
+    of the comma-separated ``client_auth_tokens_extra`` list (whitespace
+    trimmed, empties dropped). This is what lets more than one caller — e.g.
+    a phone app and a chat bot — authenticate against one proxy instance.
+    """
+    allowed: set[str] = set()
+    if client_auth_token:
+        allowed.add(f"Bearer {client_auth_token}")
+    allowed.update(
+        f"Bearer {t.strip()}"
+        for t in config.client_auth_tokens_extra.split(",")
+        if t.strip()
+    )
+    return allowed
 
 
 def _build_upstream_headers(
