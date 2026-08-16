@@ -39,6 +39,11 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 - Bare `mypy` invocation broke on mypy 2.x (which no longer honours the
   `packages` config key as a default target); CI now passes `mypy src`.
+- The stats store degrades to in-memory instead of crashing the proxy when
+  its SQLite file can't be opened (e.g. a relative default `db_path` under
+  a systemd service whose CWD isn't writable) — telemetry must never take
+  down a live request path. A warning is logged so the loss of persistence
+  is visible.
 - Tests importing the `benchmark` package failed under the `pytest` console
   script (no CWD on `sys.path`); a root `conftest.py` fixes it.
 - `build.py` now fails with an actionable message when the private pet

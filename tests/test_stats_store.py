@@ -56,6 +56,18 @@ def test_memory_store_behaves_like_file():
     store.close()
 
 
+def test_unwritable_path_degrades_to_memory_not_crash(caplog):
+    """A db_path whose directory doesn't exist must fall back to in-memory
+    stats with a warning, not raise — otherwise any deployment whose CWD
+    isn't writable dies at startup (the 0.4.0 production incident)."""
+    with caplog.at_level("WARNING", logger="roleplay_slim"):
+        store = StatsStore("/nonexistent-dir-xyz/roleplay-slim-stats.db")
+    store.record(MSGS, [])
+    assert store.summary()["request_count"] == 1
+    assert any("falling back to in-memory" in r.message for r in caplog.records)
+    store.close()
+
+
 def test_record_usage_backfills_latest_row(tmp_path):
     store = StatsStore(str(tmp_path / "u.db"))
     store.record(MSGS, [])

@@ -14,11 +14,14 @@ old behavior, zero file created, byte-compatible ``/stats`` output.
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime
 from typing import Any
 
 from ..stats import _coerce_int, estimate_messages_tokens
+
+logger = logging.getLogger("roleplay_slim")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS requests (
@@ -36,7 +39,20 @@ CREATE TABLE IF NOT EXISTS requests (
 
 class StatsStore:
     def __init__(self, path: str = "stats.db") -> None:
-        self._conn = sqlite3.connect(path, check_same_thread=False)
+        # A stats database is telemetry — it must never take down the live
+        # proxy. If the path can't be opened (unwritable directory, which a
+        # systemd service's CWD often is for a relative default), degrade to
+        # in-memory with a warning rather than crash on startup.
+        try:
+            self._conn = sqlite3.connect(path, check_same_thread=False)
+        except sqlite3.Error:
+            logger.warning(
+                "could not open stats database %r — falling back to in-memory "
+                "stats; /stats will not survive a restart. Set an absolute, "
+                "writable [stats] db_path to persist.",
+                path,
+            )
+            self._conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._conn.execute(_SCHEMA)
         self._conn.commit()
 
