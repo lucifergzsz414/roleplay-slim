@@ -292,3 +292,57 @@ def test_prefix_only_conversation_does_not_crash(tmp_path):
 def test_subcommand_is_required():
     with pytest.raises(SystemExit):
         main([])
+
+
+# --- optimize -----------------------------------------------------------
+
+def _optimize_samples(n: int = 20) -> list[list[dict]]:
+    """Samples with a stable 1-message prefix and varying first user line."""
+    return [
+        [dict(PREFIX), {"role": "user", "content": f"Q{i}. Two. Three."}]
+        for i in range(n)
+    ]
+
+
+def test_optimize_reports_stable_prefix(tmp_path):
+    path = _write_json(tmp_path, _optimize_samples(), name="samples.json")
+    code, text = _run("optimize", path)
+    assert code == 0
+    assert "roleplay-slim optimize" in text
+    assert "recommended prefix: first 1 message(s)" in text
+    assert "cache-hit ceiling estimate" in text
+
+
+def test_optimize_accepts_request_body_samples(tmp_path):
+    samples = [
+        {"model": "x", "messages": [dict(PREFIX), {"role": "user", "content": f"Q{i}. Two."}]}
+        for i in range(20)
+    ]
+    path = _write_json(tmp_path, samples)
+    code, text = _run("optimize", path)
+    assert code == 0
+
+
+def test_optimize_json_mode(tmp_path):
+    path = _write_json(tmp_path, _optimize_samples())
+    code, text = _run("optimize", path, "--json")
+    assert code == 0
+    parsed = json.loads(text)
+    assert parsed["samples"] == 20
+    assert parsed["recommended_prefix"] == 1
+    assert len(parsed["positions"]) >= 2
+    assert parsed["positions"][0]["stable"] is True
+
+
+def test_optimize_empty_samples_is_clean_error(tmp_path):
+    path = _write_json(tmp_path, [])
+    with pytest.raises(SystemExit) as e:
+        _run("optimize", path)
+    assert "at least one sample" in str(e.value)
+
+
+def test_optimize_malformed_sample_is_clean_error(tmp_path):
+    path = _write_json(tmp_path, [[dict(PREFIX), "not a message dict"]])
+    with pytest.raises(SystemExit) as e:
+        _run("optimize", path)
+    assert "sample #0" in str(e.value)

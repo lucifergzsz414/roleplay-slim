@@ -18,6 +18,7 @@ from typing import Any, TextIO
 
 from .compressor import compress
 from .config import CompressorConfig
+from .optimizer import OptimizationReport, analyze
 from .segmenter import segment
 from .stats import estimate_messages_tokens
 from .strategies import content_key
@@ -55,13 +56,8 @@ def _write(stream: TextIO, text: str) -> None:
     stream.write(text.encode("ascii", errors="replace").decode("ascii") + "\n")
 
 
-def _load_messages(source: str) -> list[dict]:
-    """Read messages from a file path, or from stdin when source is "-".
-
-    Accepts either a full OpenAI request body ({"messages": [...]}, which
-    is what you get by dumping a real request) or a bare array, so a
-    captured payload can be fed straight in without editing.
-    """
+def _read_json(source: str) -> Any:
+    """Read and parse JSON from a file path, or from stdin when "-"."""
     if source == "-":
         raw = sys.stdin.read()
     else:
@@ -78,10 +74,19 @@ def _load_messages(source: str) -> list[dict]:
             raise SystemExit(f"error: could not read {source} ({e})")
 
     try:
-        data: Any = json.loads(raw)
+        return json.loads(raw)
     except json.JSONDecodeError as e:
         raise SystemExit(f"error: {source} is not valid JSON ({e})")
 
+
+def _load_messages(source: str) -> list[dict]:
+    """Read messages from a file path, or from stdin when source is "-".
+
+    Accepts either a full OpenAI request body ({"messages": [...]}, which
+    is what you get by dumping a real request) or a bare array, so a
+    captured payload can be fed straight in without editing.
+    """
+    data = _read_json(source)
     if isinstance(data, dict):
         data = data.get("messages")
     if not isinstance(data, list) or not all(isinstance(m, dict) for m in data):
@@ -90,6 +95,30 @@ def _load_messages(source: str) -> list[dict]:
             f'"messages" array — got {type(data).__name__} in {source}'
         )
     return data
+
+
+def _load_samples(source: str) -> list[list[dict]]:
+    """Read a batch of samples for the optimizer.
+
+    Expected shape: a JSON array where each element is either a messages
+    array or a full OpenAI request body ({"messages": [...]}).
+    """
+    data = _read_json(source)
+    if not isinstance(data, list):
+        raise SystemExit(
+            f"error: expected a JSON array of samples — got {type(data).__name__} in {source}"
+        )
+    samples: list[list[dict]] = []
+    for i, item in enumerate(data):
+        if isinstance(item, dict):
+            item = item.get("messages")
+        if not isinstance(item, list) or not all(isinstance(m, dict) for m in item):
+            raise SystemExit(
+                f"error: sample #{i} is not a messages array or a "
+                f'{{"messages": [...]}} object in {source}'
+            )
+        samples.append(item)
+    return samples
 
 
 def _describe(message: dict) -> str:
@@ -264,6 +293,99 @@ def _render_report(before: list[dict], after: list[dict], n_prefix: int, out: Te
     _write(out, "  no original-to-replacement pairing is claimed, because none is reliable.")
 
 
+def _report_to_dict(report: OptimizationReport) -> dict:
+    """Serialize the optimization report to plain data for --json output."""
+    return {
+        "samples": report.samples,
+        "recommended_prefix": report.recommended_prefix,
+        "current_prefix_share_pct": report.current_prefix_share_pct,
+        "prefix_share_by_len": report.prefix_share_by_len,
+        "positions": [
+            {
+                "index": p.index,
+                "appearances": p.appearances,
+                "appearance_rate": round(p.appearance_rate, 4),
+                "identical_rate": round(p.identical_rate, 4) if p.identical_rate is not None else None,
+                "role": p.role,
+                "content_preview": p.content_preview,
+                "stable": p.stable,
+            }
+            for p in report.positions
+        ],
+    }
+
+
+def _render_optimize_report(
+    report: OptimizationReport,
+    min_appearance: float,
+    min_identical: float,
+    out: TextIO,
+) -> None:
+    _write(out, "=" * 72)
+    _write(out, f"roleplay-slim optimize — {report.samples} samples")
+    _write(out, "=" * 72)
+    _write(out, "")
+    _write(
+        out,
+        f"{'idx':>3}  {'role':<9} {'appear':>7} {'ident':>6}  content "
+        f"(* = stable at >={min_appearance:.0%} appear, >={min_identical:.0%} identical)",
+    )
+    _write(out, "-" * 72)
+    for p in report.positions:
+        ident = f"{p.identical_rate * 100:5.0f}%" if p.identical_rate is not None else "   —"
+        body = p.content_preview
+        if len(body) > _SNIPPET:
+            body = body[: _SNIPPET - 1] + "…"
+        marker = "*" if p.stable else " "
+        _write(
+            out,
+            f"{p.index:>3}  {str(p.role or '?'):<9} {p.appearance_rate * 100:6.0f}% "
+            f"{ident}  {marker}{body}",
+        )
+    _write(out, "")
+
+    k = report.recommended_prefix
+    cur = report.current_prefix_share_pct
+    proj = report.prefix_share_by_len[k] if k < len(report.prefix_share_by_len) else cur
+    _write(out, f"recommended prefix: first {k} message(s)")
+    _write(out, "  cache-hit ceiling estimate (prefix share of the prompt; an estimate):")
+    _write(out, f"    current (segmenter-detected): {cur:.1f}%")
+    _write(out, f"    after hoisting first {k}:      {proj:.1f}%  ({proj - cur:+.1f}pp)")
+
+    # Stable positions beyond the leading run: visible in the table as *,
+    # but they can't extend a *contiguous* prefix without dragging the
+    # varying message(s) before them along — a byte-identical prefix is the
+    # whole point, so this is reported as a note, not as a projection.
+    blocked = [p for p in report.positions[k:] if p.stable]
+    if blocked:
+        _write(out, "  also stable but blocked by a varying earlier message (not hoistable):")
+        for p in blocked:
+            body = p.content_preview
+            if len(body) > _SNIPPET:
+                body = body[: _SNIPPET - 1] + "…"
+            _write(out, f"    position {p.index} ({p.role}): {body}")
+
+
+def _optimize(args: argparse.Namespace, out: TextIO) -> int:
+    samples = _load_samples(args.samples)
+    try:
+        report = analyze(
+            samples,
+            min_appearance=args.min_appearance,
+            min_identical=args.min_identical,
+        )
+    except ValueError as e:
+        raise SystemExit(f"error: {e}")
+
+    if args.json:
+        json.dump(_report_to_dict(report), out, ensure_ascii=False, indent=2)
+        out.write("\n")
+        return 0
+
+    _render_optimize_report(report, args.min_appearance, args.min_identical, out)
+    return 0
+
+
 def main(argv: list[str] | None = None, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     parser = argparse.ArgumentParser(
@@ -314,9 +436,41 @@ def main(argv: list[str] | None = None, out: TextIO | None = None) -> int:
         "--quiet", action="store_true", help="Summary only, no per-message detail"
     )
 
+    optimize = sub.add_parser(
+        "optimize",
+        help="Find which leading messages are stable across many requests, and estimate the cache-hit ceiling if you hoisted them into the prefix",
+        description=(
+            "Analyze a batch of captured requests to find cross-request-stable "
+            "leading messages and project the cache-hit ceiling before and "
+            "after hoisting them into the app's prefix block. Makes no "
+            "network requests and writes no files."
+        ),
+    )
+    optimize.add_argument(
+        "samples",
+        help='JSON file holding an array of message arrays (or request bodies); "-" for stdin',
+    )
+    optimize.add_argument("--json", action="store_true", help="Emit the report as JSON")
+    optimize.add_argument(
+        "--min-appearance",
+        dest="min_appearance",
+        type=float,
+        default=0.90,
+        help="min appearance rate for a position to count as stable (default 0.90)",
+    )
+    optimize.add_argument(
+        "--min-identical",
+        dest="min_identical",
+        type=float,
+        default=0.95,
+        help="min byte-identical rate for a position to count as stable (default 0.95)",
+    )
+
     args = parser.parse_args(argv)
     if args.command == "preview":
         return _preview(args, out)
+    if args.command == "optimize":
+        return _optimize(args, out)
     return 1  # pragma: no cover - argparse rejects unknown subcommands first
 
 
