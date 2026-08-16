@@ -23,7 +23,10 @@ jobs:
       - name: Run tests
         run: pytest -v
       - name: Type check
-        run: mypy
+        # Explicit target, not bare `mypy`: mypy 2.x no longer honours the
+        # `[tool.mypy] packages` key as the default check target, so a bare
+        # invocation fails with "Missing target module" regardless of code.
+        run: mypy src
 
   packaging:
     runs-on: ubuntu-latest
