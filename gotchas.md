@@ -62,6 +62,11 @@
 
 **解决**：构建发布包一律用 `hatch build`，不要用 `python -m build`。
 
+**2026-08-20 更新**：`build.py` 已挪到 `integrations/pet-installer/build.py`（见下方
+"BandoriPet 文件"条目），不再躺在仓库根——这个坑现在从根目录跑 `python -m build`
+**不会再发生**。仍保留本记录：坑本身的教训（`-m` 优先找 CWD 同名模块）在别的项目
+可能重现，而且历史上确实炸过一次。
+
 ## `dist/` 不是纯构建产物目录，`rm -rf dist` 会删掉分发包
 
 **日期**：2026-08-13
@@ -74,41 +79,57 @@
 PyInstaller 产出的 exe、以及给最终用户的分发 zip。`dist/` 在 `.gitignore` 里，
 所以 git 救不回来。
 
+**2026-08-20 更新**：`build.py` 挪到 `integrations/pet-installer/` 后，PyInstaller
+产物和分发 zip 现在写进 `integrations/pet-installer/dist/`，跟仓库根的
+`dist/`（只剩 hatch 的 sdist/wheel）**彻底分开**了。三类东西混一个目录的根因已解决，
+`rm -rf dist`（仓库根）现在只会删 PyPI 产物，不会删桌宠分发包了——但两边都还是
+"删了 git 救不回来"，`rm -rf dist` 之前先看清是哪个 `dist/`，这条预防仍然成立。
+
 **代价**：重建要跑两趟 PyInstaller（约几分钟），且必须用全局 Python
 （`AppData\Local\Programs\Python\Python312`，见文末"PyInstaller构建环境"），
 venv 里没装 pyinstaller。
 
-**重建命令**（两趟，顺序不能反）：
+**重建命令**（两趟，顺序不能反；2026-08-20 起路径改为
+`integrations/pet-installer/build.py`，需先 `cd integrations/pet-installer`）：
 ```
+cd integrations/pet-installer
 python build.py                                    # 若叶睦三件套 exe
 python build.py --bandori-only --zip --bandori-zip # Bandori两个exe + 打两个zip
 ```
 第二趟带了 `--bandori-only`，`any_only` 为真会导致若叶睦三件套**不重建**，
-所以第一趟必须先跑完。
+所以第一趟必须先跑完。产物现在落在 `integrations/pet-installer/dist/`，不再是仓库根
+`dist/`（那里现在只放 PyPI 的 sdist/wheel）。
 
 **预防**：要清理只删具体文件，别整个删目录。
 
-## 四个 BandoriPet 文件不是"遗留垃圾"，别搬也别删
+## BandoriPet 工具链已完整并入 integrations/pet-installer/（2026-08-13 失败尝试的后续）
 
-**日期**：2026-08-13
+**日期**：2026-08-13（首次尝试，失败并撤销）→ 2026-08-20（完整重做，成功）
 
-`install_bandori_gui.py` / `uninstall_bandori_gui.py` /
-`installer_bandori/patch_bandori.py` / `使用说明_BandoriPet.txt` 长期以
-untracked 状态躺在根目录，看着像误放的杂物，其实是本项目给 BandoriPet
-桌宠写的安装器，跟根目录那套若叶睦的（`install_gui.py` / `installer/` /
-`使用说明.txt`）是孪生结构，`build.py` 第 42-49 行按根目录路径写死。
+2026-08-13 只想挪 4 个 BandoriPet 文件（`install_bandori_gui.py` /
+`uninstall_bandori_gui.py` / `installer_bandori/patch_bandori.py` /
+`使用说明_BandoriPet.txt`），结果弄坏两处：`build.py` 的 `BANDORI_*_SRC` 常量全部
+失效；两个 GUI 里的 `sys.path.insert(0, _bundle_dir / "installer_bandori")` 指向了
+已删目录。当时判断"只挪一半，两套孪生结构就会散架"，撤销并记录"真想整理，得把
+若叶睦那套一起挪"。
 
-曾经把它们挪进 `integrations/bandoripet/`，连带弄坏两处：`build.py` 的
-`BANDORI_*_SRC` 常量全部失效；两个 GUI 里的
-`sys.path.insert(0, _bundle_dir / "installer_bandori")` 指向了已删目录。
-**已撤销，恢复根目录布局并纳入 git 跟踪。**
+**2026-08-20 按那条记录整体挪动**，一次性把两套（若叶睦 + BandoriPet）连同
+`build.py`、`proxy_entry.py` 一起搬进 `integrations/pet-installer/`：
+- `build.py` / `install_gui.py` / `uninstall_gui.py` / `installer/` /
+  `install_bandori_gui.py` / `uninstall_bandori_gui.py` / `installer_bandori/` /
+  `proxy_entry.py` —— 全部用 `git mv`，历史保留
+- 只改了一处代码逻辑：`build.py` 加 `REPO_ROOT = ROOT.parent.parent`，
+  `PROXY_PACKAGE` 从 `ROOT / "src" / "roleplay_slim"` 改成
+  `REPO_ROOT / "src" / "roleplay_slim"`（因为 `build.py` 现在离 `src/` 隔了两层）
+- 两个 GUI 的 `sys.path.insert` 不用动——它们相对 `__file__` 定位 `installer/`，
+  整体平移后相对关系不变
+- `dist/_build_*/` 里的 PyInstaller spec 不用手动改，是生成产物，下次构建自动重建
+- **验证方式**：真跑了一次 `python build.py --proxy-only`（不是只测路径判断），
+  确认 `--paths` 正确解析到仓库根 `src/`，产物 25.2MB exe 启动后 `/healthz` 返回
+  200，冒烟测试通过后才收尾
 
-它们当初进过 0.3.1 的 sdist，但那是打包配置的问题，**已由
-`pyproject.toml` 的 `[tool.hatch.build.targets.sdist] include` 白名单
-解决**——根目录放什么都不会再被扫进发布包。所以没有任何理由再动它们的位置。
-
-真想整理，得把若叶睦那套一起挪，并同步改 `build.py`、本文件、以及
-`dist/_build_*/` 里引用源码路径的 PyInstaller spec，属于独立重构。
+`使用说明*.txt` 两个文件本身已在更早的提交里从仓库删除（私有分发内容），
+`build.py` 对它们的缺失有专门挡板（见"缺失使用说明"相关条目），这次搬动不受影响。
 
 ## 代理转发响应时忘删 Content-Encoding，导致 UnityWebRequest 报 "Unrecognized content-encoding"
 
@@ -135,9 +156,12 @@ gzip不需要额外装brotli库就能在标准库里复现），确认修复后�
 `content-encoding`消失、body正确解码。这比走真实API更干净、更确定，以后遇到
 "httpx透明解压+转发响应头"这类代理bug可以照搬这个验证方法。
 
-**部署方式的坑**：这个项目会打包成 PyInstaller 独立exe（`dist/roleplay-slim-proxy.exe`），
-桌宠装的是打包版的zip分发包（`dist/若叶睦桌宠-上下文优化代理.zip` 和
-`dist/邦多利桌宠-上下文优化代理.zip`），**只改源码不够**——必须重新
+**部署方式的坑**：这个项目会打包成 PyInstaller 独立exe，桌宠装的是打包版的zip分发包
+（2026-08-20 起路径是 `integrations/pet-installer/dist/roleplay-slim-proxy.exe`、
+`integrations/pet-installer/dist/若叶睦桌宠-上下文优化代理.zip`、
+`integrations/pet-installer/dist/邦多利桌宠-上下文优化代理.zip`——之前在仓库根
+`dist/` 下，见"BandoriPet 工具链已完整并入"条目），**只改源码不够**——必须
+`cd integrations/pet-installer` 后重新
 `pyinstaller dist\_build_proxy\roleplay-slim-proxy.spec --distpath dist
 --workpath dist\_build_proxy --noconfirm` 重新构建exe，再把新exe塞回这两个zip里
 （zip里其他文件——安装器/卸载器/使用说明——不要动，用 `zipfile` 只替换单个entry，

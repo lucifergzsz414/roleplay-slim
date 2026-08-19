@@ -1,10 +1,14 @@
 """Build standalone Windows executables for distribution.
 
+This toolchain is private pet-distribution tooling, not part of the
+published roleplay-slim library or package — it lives under
+integrations/pet-installer/, separate from src/roleplay_slim.
+
 Produces two self-contained .exe files:
     1. 安装器.exe          — GUI installer (no Python required)
     2. roleplay-slim-proxy.exe — the compression proxy itself
 
-Usage:
+Usage (run from this directory, integrations/pet-installer/):
     python build.py                    # build both
     python build.py --installer-only   # only the installer
     python build.py --proxy-only       # only the proxy
@@ -24,13 +28,17 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+# This toolchain lives at <repo>/integrations/pet-installer/ — two levels
+# below the repo root, which is where the actual roleplay_slim package
+# (the thing being frozen into the proxy exe) lives.
+REPO_ROOT = ROOT.parent.parent
 DIST = ROOT / "dist"
 INSTALLER_SRC = ROOT / "install_gui.py"
 UNINSTALLER_SRC = ROOT / "uninstall_gui.py"
 INSTALLER_DIR = ROOT / "installer"
 INSTALL_DEPS = [INSTALLER_DIR / "install.py"]
 PROXY_ENTRY = ROOT / "proxy_entry.py"
-PROXY_PACKAGE = ROOT / "src" / "roleplay_slim"
+PROXY_PACKAGE = REPO_ROOT / "src" / "roleplay_slim"
 
 INSTALLER_EXE_NAME = "安装器.exe"
 UNINSTALLER_EXE_NAME = "卸载还原器.exe"
