@@ -29,15 +29,16 @@ of these.
   Breaks the project's "zero ML dependency" purity if it needs embeddings for
   near-duplicate matching, so it should ship as an opt-in extra, not a
   default-on behavior.
-- **Real-log validation for the prefix optimizer.** The optimizer's own
-  design doc calls for validating it against a real (redacted) request log,
-  not just synthetic samples — not done yet, since the only real log
-  available is a private production deployment's traffic. A synthetic
-  corpus built to match real observed *structural* patterns (without any
-  real request content) would close this without touching private data.
 - **More framework adapters in `examples/`.** SillyTavern and a QQ bot
   adapter exist; Telegram, Discord (beyond the stub), and a generic
   OpenWebUI-style adapter would each be a small, low-risk PR.
+
+## Shipped since 0.4.0
+
+| Item | Shipped in |
+|---|---|
+| Real-shape validation for the prefix optimizer (`tests/test_optimizer_real_shape.py`) — synthetic corpus matching real observed traffic structure, no real content | 0.4.1 |
+| `StatsStore` usage-attribution race fix (see CHANGELOG) | 0.4.1 |
 
 ## Explicitly out of scope
 

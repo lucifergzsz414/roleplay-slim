@@ -6,6 +6,20 @@ follows [Semantic Versioning](https://semver.org/) — while the major
 version is `0`, breaking changes may still land in a minor release (per
 semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
+## [Unreleased]
+
+### Added
+
+- Real-shape validation for the prefix optimizer
+  (`tests/test_optimizer_real_shape.py`), closing the item the optimizer's
+  own design doc left open. No real request content — a synthetic corpus
+  whose *structural* parameters (prefix message count, turn-count spread, a
+  recurring footer) match traffic actually observed on a production
+  deployment. Confirms `analyze()` still recommends exactly the true
+  prefix, and projects a cache-hit ceiling in the same order of magnitude
+  as the real, previously-measured figure, under a messier corpus than the
+  clean single-shape one in `test_optimizer.py`.
+
 ## [0.4.1] — 2026-08-20
 
 ### Fixed
