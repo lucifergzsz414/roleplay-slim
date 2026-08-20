@@ -21,14 +21,18 @@ of these.
 
 ## Proposed, not started
 
-- **Semantic caching for the dynamic region.** Exact- or near-duplicate
-  requests (a companion-bot "在吗" pattern) could return a cached compressed
-  result instead of re-compressing every time. Deliberately deferred until
-  the fidelity benchmark existed, so a caching layer can be checked against
-  it rather than shipped on faith — that benchmark exists now (see above).
-  Breaks the project's "zero ML dependency" purity if it needs embeddings for
-  near-duplicate matching, so it should ship as an opt-in extra, not a
-  default-on behavior.
+- **~~Semantic caching~~ — mostly rejected on design review.** The original
+  framing here conflated two different things; see
+  [`semantic-cache.md`](docs/designs/semantic-cache.md) for the split.
+  Caching the *upstream LLM's reply* for repeated inputs (the original
+  "companion-bot 在吗" motivation) is rejected outright — it would make a
+  roleplay character give verbatim-identical responses to repeated
+  questions, directly undermining the project's own persona-consistency
+  pitch (consistent character ≠ canned lines). Caching `compress()`'s own
+  output (a pure CPU optimization, no ML needed) is technically sound but
+  has no evidence it's a real bottleneck — proxy deployments are dominated
+  by network I/O, not compression CPU — so it stays unbuilt pending actual
+  profiling data showing otherwise.
 - **More framework adapters in `examples/`.** SillyTavern and a QQ bot
   adapter exist; Telegram, Discord (beyond the stub), and a generic
   OpenWebUI-style adapter would each be a small, low-risk PR.
