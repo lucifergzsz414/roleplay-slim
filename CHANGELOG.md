@@ -10,6 +10,13 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ### Added
 
+- Two new `examples/`: `telegram_bot.py` (library-mode skeleton, same
+  pattern as the existing Discord example) and
+  `openwebui_style_adapter.py` (documents the zero-code-change proxy-mode
+  integration for any generic OpenAI-compatible chat UI — OpenWebUI,
+  LibreChat, and similar — plus a library-mode dry-run for anyone building
+  their own from scratch). Both verified to actually run end-to-end, not
+  just pass lint.
 - Real-shape validation for the prefix optimizer
   (`tests/test_optimizer_real_shape.py`), closing the item the optimizer's
   own design doc left open. No real request content — a synthetic corpus

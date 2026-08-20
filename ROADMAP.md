@@ -33,9 +33,13 @@ of these.
   has no evidence it's a real bottleneck — proxy deployments are dominated
   by network I/O, not compression CPU — so it stays unbuilt pending actual
   profiling data showing otherwise.
-- **More framework adapters in `examples/`.** SillyTavern and a QQ bot
-  adapter exist; Telegram, Discord (beyond the stub), and a generic
-  OpenWebUI-style adapter would each be a small, low-risk PR.
+- **More framework adapters in `examples/`.** SillyTavern, a QQ bot,
+  Telegram, and a generic OpenWebUI-style adapter now exist (see below).
+  Discord already had a working example, not actually just a stub as this
+  entry used to claim. A native Discord.py `Cog`-based version and a
+  proper async/production-grade Telegram bot (the current ones are
+  library-mode skeletons with the real event-loop wiring commented out)
+  would still be welcome contributions.
 
 ## Shipped since 0.4.0
 
@@ -43,6 +47,8 @@ of these.
 |---|---|
 | Real-shape validation for the prefix optimizer (`tests/test_optimizer_real_shape.py`) — synthetic corpus matching real observed traffic structure, no real content | 0.4.1 |
 | `StatsStore` usage-attribution race fix (see CHANGELOG) | 0.4.1 |
+| `semantic-cache.md` design review — most of the original proposal rejected, see above | Unreleased |
+| Telegram adapter (`examples/telegram_bot.py`) and a generic OpenAI-compatible / OpenWebUI-style adapter (`examples/openwebui_style_adapter.py`) | Unreleased |
 
 ## Explicitly out of scope
 
