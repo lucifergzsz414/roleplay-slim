@@ -13,42 +13,35 @@ the reasoning, trade-offs, and what was deliberately cut from scope.
 | `/stats` SQLite persistence (survives restarts) | [`stats-persistence.md`](docs/designs/stats-persistence.md) | 0.4.0 |
 | Multi-client-token proxy auth (`client_auth_tokens_extra`) | — (see CHANGELOG) | 0.4.0 |
 | CI: ruff lint + sdist packaging gate | — (see `gotchas.md`) | 0.4.0 |
+| Real-shape validation for the prefix optimizer (`tests/test_optimizer_real_shape.py`) — synthetic corpus matching real observed traffic structure, no real content | [`prefix-optimizer.md`](docs/designs/prefix-optimizer.md) | 0.4.1 |
+| `StatsStore` usage-attribution race fix — see CHANGELOG | — | 0.4.1 |
+| Semantic-cache design review — original proposal conflated two things; the money-saving half (caching LLM replies) rejected outright, the CPU-saving half left undocumented pending real profiling evidence | [`semantic-cache.md`](docs/designs/semantic-cache.md) | Unreleased |
+| Telegram adapter (`examples/telegram_bot.py`) and a generic OpenAI-compatible / OpenWebUI-style adapter (`examples/openwebui_style_adapter.py`) | — | Unreleased |
 
 Each design doc records where the shipped implementation deliberately
 diverged from the original proposal (usually: cutting scope that turned out
-to be premature) — worth reading before proposing a bigger version of any
-of these.
+to be premature, or — for semantic-cache — rejecting most of the proposal
+outright) — worth reading before proposing a bigger version of any of these.
 
 ## Proposed, not started
 
-- **~~Semantic caching~~ — mostly rejected on design review.** The original
-  framing here conflated two different things; see
-  [`semantic-cache.md`](docs/designs/semantic-cache.md) for the split.
-  Caching the *upstream LLM's reply* for repeated inputs (the original
-  "companion-bot 在吗" motivation) is rejected outright — it would make a
-  roleplay character give verbatim-identical responses to repeated
-  questions, directly undermining the project's own persona-consistency
-  pitch (consistent character ≠ canned lines). Caching `compress()`'s own
-  output (a pure CPU optimization, no ML needed) is technically sound but
-  has no evidence it's a real bottleneck — proxy deployments are dominated
-  by network I/O, not compression CPU — so it stays unbuilt pending actual
-  profiling data showing otherwise.
+Nothing right now. Everything that was on this list has either shipped or
+been resolved by design review (see Shipped, above, and each item's design
+doc for what was cut and why). This section stays here as the place new
+proposals go, not as a promise something is always pending.
+
+Open to suggestions — see [CONTRIBUTING.md](CONTRIBUTING.md) for how a
+larger feature proposal should start (a short design doc in
+`docs/designs/`, same as everything above).
+
+## Ongoing, not versioned
+
 - **More framework adapters in `examples/`.** SillyTavern, a QQ bot,
-  Telegram, and a generic OpenWebUI-style adapter now exist (see below).
-  Discord already had a working example, not actually just a stub as this
-  entry used to claim. A native Discord.py `Cog`-based version and a
-  proper async/production-grade Telegram bot (the current ones are
-  library-mode skeletons with the real event-loop wiring commented out)
-  would still be welcome contributions.
-
-## Shipped since 0.4.0
-
-| Item | Shipped in |
-|---|---|
-| Real-shape validation for the prefix optimizer (`tests/test_optimizer_real_shape.py`) — synthetic corpus matching real observed traffic structure, no real content | 0.4.1 |
-| `StatsStore` usage-attribution race fix (see CHANGELOG) | 0.4.1 |
-| `semantic-cache.md` design review — most of the original proposal rejected, see above | Unreleased |
-| Telegram adapter (`examples/telegram_bot.py`) and a generic OpenAI-compatible / OpenWebUI-style adapter (`examples/openwebui_style_adapter.py`) | Unreleased |
+  Telegram, and a generic OpenWebUI-style adapter exist. A native
+  Discord.py `Cog`-based version and a proper async/production-grade
+  Telegram bot (the current ones are library-mode skeletons with the real
+  event-loop wiring commented out, by design — see each file's docstring)
+  would be welcome contributions, but aren't blocking anything.
 
 ## Explicitly out of scope
 
