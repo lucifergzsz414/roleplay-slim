@@ -644,12 +644,27 @@ turning into an unhandled exception or a misleading 200.
 
 ## Status
 
-v0.3 — built and dogfooded against one production roleplay bot's traffic.
-167 tests, including Hypothesis property tests over generated message
-shapes.
+v0.4 — built and dogfooded against real production traffic. 209 tests,
+including Hypothesis property tests over generated message shapes.
 
-Contributions welcome, especially additional `stage_direction_pattern`
-presets for other apps' conventions.
+Two things production use has actually caught and fixed, worth knowing
+about if you're evaluating this for your own deployment:
+
+- **Multiple callers, one proxy instance.** The client-auth gate
+  (`client_auth_tokens_extra`) exists because a real deployment ended up
+  with more than one internal service sharing a single proxy instance —
+  each with its own credential, all hitting the same cache-warm prefix.
+  Not a hypothetical use case.
+- **Telemetry must never take the proxy down.** An early version of
+  `/stats` persistence assumed its SQLite file's directory was writable;
+  under a real systemd service (CWD not writable) it crash-looped on
+  startup. Fixed to degrade to in-memory with a logged warning instead —
+  see [CHANGELOG.md](CHANGELOG.md), 0.4.0.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to run the tests, what the
+CI gate checks, and where to start — especially additional
+`stage_direction_pattern` presets for other apps' conventions.
+See [ROADMAP.md](ROADMAP.md) for what's shipped and what's next.
 
 ## License
 
