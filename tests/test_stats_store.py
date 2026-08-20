@@ -70,14 +70,15 @@ def test_unwritable_path_degrades_to_memory_not_crash(caplog):
 
 def test_record_usage_backfills_latest_row(tmp_path):
     store = StatsStore(str(tmp_path / "u.db"))
-    store.record(MSGS, [])
+    entry = store.record(MSGS, [])
     rec = store.record_usage(
         {
             "prompt_tokens": 1234,
             "completion_tokens": 56,
             "prompt_cache_hit_tokens": 512,
             "prompt_cache_miss_tokens": 722,
-        }
+        },
+        entry["id"],
     )
     assert rec["prompt_tokens"] == 1234
     upstream = store.summary()["upstream"]
@@ -100,8 +101,8 @@ def test_usage_is_null_before_any_provider_accounting(tmp_path):
 
 def test_usage_with_no_recognisable_numbers_is_ignored(tmp_path):
     store = StatsStore(str(tmp_path / "x.db"))
-    store.record(MSGS, [])
-    assert store.record_usage({"prompt_tokens": None}) is None
+    entry = store.record(MSGS, [])
+    assert store.record_usage({"prompt_tokens": None}, entry["id"]) is None
     assert store.summary()["upstream"] is None
     store.close()
 
@@ -110,16 +111,52 @@ def test_usage_unparseable_field_types_are_dropped(tmp_path):
     """Same tolerance as CompressionStats: a wrong number is worse than a
     missing one when these figures back the cache claim."""
     store = StatsStore(str(tmp_path / "y.db"))
-    store.record(MSGS, [])
+    entry = store.record(MSGS, [])
     store.record_usage(
         {
             "prompt_tokens": 40.0,
             "completion_tokens": None,
             "prompt_cache_hit_tokens": "lots",
-        }
+        },
+        entry["id"],
     )
     upstream = store.summary()["upstream"]
     assert upstream["prompt_tokens_total"] == 40
     assert upstream["completion_tokens_total"] == 0
     assert upstream["cache_hit_tokens_total"] is None
+    store.close()
+
+
+def test_record_returns_row_id():
+    store = StatsStore(":memory:")
+    e1 = store.record(MSGS, [])
+    e2 = store.record(MSGS, [])
+    assert e1["id"] != e2["id"]
+    store.close()
+
+
+def test_usage_attributes_to_the_correct_row_not_the_latest(tmp_path):
+    """Regression test for the race this fixes: request A is recorded, then
+    request B is recorded (interleaved, as happens under real concurrent
+    requests), then A's usage comes back. Before row_id was required, this
+    landed on whichever row was numerically highest (B's) instead of A's —
+    found via two real near-simultaneous production requests, one ending up
+    with no upstream data and the other with someone else's."""
+    store = StatsStore(str(tmp_path / "race.db"))
+    entry_a = store.record(MSGS, [])
+    entry_b = store.record(MSGS, [])
+    # B's response comes back first, then A's — record_usage() is called out
+    # of insertion order, which is exactly what a "latest row" heuristic
+    # gets wrong.
+    store.record_usage({"prompt_tokens": 200, "completion_tokens": 20}, entry_b["id"])
+    store.record_usage({"prompt_tokens": 100, "completion_tokens": 10}, entry_a["id"])
+
+    rows = {
+        row_id: (prompt, completion)
+        for row_id, prompt, completion in store._conn.execute(
+            "SELECT id, upstream_prompt, upstream_completion FROM requests"
+        )
+    }
+    assert rows[entry_a["id"]] == (100, 10)
+    assert rows[entry_b["id"]] == (200, 20)
     store.close()

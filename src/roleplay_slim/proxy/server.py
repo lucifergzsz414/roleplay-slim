@@ -148,7 +148,7 @@ def _passthrough_response(resp: httpx.Response) -> Response:
     )
 
 
-def _record_upstream_usage(stats: StatsStore, resp: httpx.Response) -> None:
+def _record_upstream_usage(stats: StatsStore, resp: httpx.Response, row_id: int) -> None:
     """Pull the provider-reported `usage` block out of a completed upstream
     response and hand it to stats.
 
@@ -180,7 +180,7 @@ def _record_upstream_usage(stats: StatsStore, resp: httpx.Response) -> None:
     if not isinstance(payload, dict):
         return
     try:
-        recorded = stats.record_usage(payload.get("usage"))
+        recorded = stats.record_usage(payload.get("usage"), row_id)
     except Exception:  # pragma: no cover - record_usage is already total
         logger.exception("failed to record upstream usage")
         return
@@ -334,7 +334,7 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                 return JSONResponse(
                     {"error": {"message": f"upstream request failed: {e}"}}, status_code=502
                 )
-            _record_upstream_usage(stats, resp)
+            _record_upstream_usage(stats, resp, entry["id"])
             return _passthrough_response(resp)
 
         # Open the upstream connection and read its status/headers before

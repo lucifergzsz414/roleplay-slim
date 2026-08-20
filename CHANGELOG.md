@@ -6,6 +6,21 @@ follows [Semantic Versioning](https://semver.org/) — while the major
 version is `0`, breaking changes may still land in a minor release (per
 semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
+## [0.4.1] — 2026-08-20
+
+### Fixed
+
+- `StatsStore.record_usage()` back-filled "the latest row" rather than the
+  specific request it belonged to. Under concurrent requests, a second
+  request's row could be inserted between the first request's row and its
+  response coming back, silently attributing usage to the wrong request —
+  found via two real near-simultaneous production requests, one ending up
+  with no upstream data recorded and the other carrying someone else's.
+  `record()` now returns the inserted row's `id`; `record_usage()` requires
+  it and updates that exact row. `StatsStore` is an internal implementation
+  detail (not exported from the package), so this is a patch, not a
+  behavior change any caller outside the proxy can observe.
+
 ## [0.4.0] — 2026-08-16
 
 ### Added

@@ -66,22 +66,34 @@ class StatsStore:
 
     def record(self, before: list[dict], after: list[dict]) -> dict:
         """Record one request; returns the same entry shape CompressionStats
-        produced so the proxy's logging stays untouched."""
+        produced (plus the row's ``id``) so the proxy's logging stays
+        untouched while giving the caller a precise handle for record_usage().
+        """
         before_tok = estimate_messages_tokens(before)
         after_tok = estimate_messages_tokens(after)
-        self._conn.execute(
+        cursor = self._conn.execute(
             "INSERT INTO requests (ts, tokens_before, tokens_after) VALUES (?, ?, ?)",
             (datetime.now().isoformat(timespec="seconds"), before_tok, after_tok),
         )
         self._conn.commit()
         return {
+            "id": cursor.lastrowid,
             "tokens_before": before_tok,
             "tokens_after": after_tok,
             "saved": before_tok - after_tok,
         }
 
-    def record_usage(self, usage: Any) -> dict | None:
-        """Back-fill the most recent row with the provider's usage figures.
+    def record_usage(self, usage: Any, row_id: int) -> dict | None:
+        """Back-fill the request identified by ``row_id`` with the
+        provider's usage figures.
+
+        row_id is required, not inferred from "the latest row" — under
+        concurrent requests, a second request's INSERT can land between this
+        one's INSERT and its response coming back, so "latest row" silently
+        attributes usage to the wrong request (found via two near-simultaneous
+        real requests producing one row with no upstream data and a different
+        row with someone else's). The caller gets row_id from record()'s
+        return value and threads it through to here.
 
         Mirrors CompressionStats.record_usage's tolerance: a wrong number is
         worse than a missing one here (these figures back the cache claim),
@@ -97,8 +109,8 @@ class StatsStore:
         miss = _coerce_int(usage.get("prompt_cache_miss_tokens"))
         self._conn.execute(
             "UPDATE requests SET upstream_prompt=?, upstream_completion=?, "
-            "cache_hit=?, cache_miss=? WHERE id=(SELECT MAX(id) FROM requests)",
-            (prompt or 0, completion or 0, hit, miss),
+            "cache_hit=?, cache_miss=? WHERE id=?",
+            (prompt or 0, completion or 0, hit, miss, row_id),
         )
         self._conn.commit()
         return {
