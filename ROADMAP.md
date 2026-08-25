@@ -17,6 +17,7 @@ the reasoning, trade-offs, and what was deliberately cut from scope.
 | `StatsStore` usage-attribution race fix — see CHANGELOG | — | 0.4.1 |
 | Semantic-cache design review — original proposal conflated two things; the money-saving half (caching LLM replies) rejected outright, the CPU-saving half left undocumented pending real profiling evidence | [`semantic-cache.md`](docs/designs/semantic-cache.md) | Unreleased |
 | Telegram adapter (`examples/telegram_bot.py`) and a generic OpenAI-compatible / OpenWebUI-style adapter (`examples/openwebui_style_adapter.py`) | — | Unreleased |
+| Per-request `model` recorded in `StatsStore` | [`per-request-model.md`](docs/designs/per-request-model.md) | Unreleased |
 
 Each design doc records where the shipped implementation deliberately
 diverged from the original proposal (usually: cutting scope that turned out

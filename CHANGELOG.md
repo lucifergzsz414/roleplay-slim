@@ -10,6 +10,15 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ### Added
 
+- `StatsStore.record()` now takes an optional `model` and persists it per
+  request (`requests.model` column, auto-migrated on existing `stats.db`
+  files via `ALTER TABLE`). The proxy passes the incoming request body's own
+  `model` field through automatically — no config or opt-in needed. Lets a
+  consumer with per-model pricing compute real cost per row instead of
+  assuming every request used the same tier; see
+  `docs/designs/per-request-model.md` for the production gap that motivated
+  this (a real deployment's cost-estimation script had no way to tell flash
+  from pro requests apart).
 - Two new `examples/`: `telegram_bot.py` (library-mode skeleton, same
   pattern as the existing Discord example) and
   `openwebui_style_adapter.py` (documents the zero-code-change proxy-mode

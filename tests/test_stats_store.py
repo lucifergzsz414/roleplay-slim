@@ -7,6 +7,8 @@ instance on the same file (a proxy restart).
 """
 from __future__ import annotations
 
+import sqlite3
+
 from roleplay_slim.proxy.stats_store import StatsStore
 
 MSGS = [{"role": "user", "content": "hello there. second sentence."}]
@@ -159,4 +161,65 @@ def test_usage_attributes_to_the_correct_row_not_the_latest(tmp_path):
     }
     assert rows[entry_a["id"]] == (100, 10)
     assert rows[entry_b["id"]] == (200, 20)
+    store.close()
+
+
+def test_record_stores_model(tmp_path):
+    store = StatsStore(str(tmp_path / "m.db"))
+    entry = store.record(MSGS, [], model="deepseek-v4-flash")
+    row = store._conn.execute(
+        "SELECT model FROM requests WHERE id=?", (entry["id"],)
+    ).fetchone()
+    assert row[0] == "deepseek-v4-flash"
+    store.close()
+
+
+def test_record_without_model_stays_null(tmp_path):
+    """model is optional — callers that don't pass it (or a request body
+    without a model field) get a NULL row, not a crash or a fake default."""
+    store = StatsStore(str(tmp_path / "m2.db"))
+    entry = store.record(MSGS, [])
+    row = store._conn.execute(
+        "SELECT model FROM requests WHERE id=?", (entry["id"],)
+    ).fetchone()
+    assert row[0] is None
+    store.close()
+
+
+def test_migrates_pre_existing_db_missing_model_column(tmp_path):
+    """A stats.db written before this column existed must still open and
+    accept new writes — CREATE TABLE IF NOT EXISTS doesn't retrofit an
+    existing table, so StatsStore has to ALTER TABLE on old files."""
+    path = str(tmp_path / "old.db")
+    # Build a pre-migration schema by hand (old CREATE TABLE, no model column).
+    conn = sqlite3.connect(path)
+    conn.execute(
+        """CREATE TABLE requests (
+            id INTEGER PRIMARY KEY,
+            ts TEXT NOT NULL,
+            tokens_before INTEGER NOT NULL,
+            tokens_after INTEGER NOT NULL,
+            upstream_prompt INTEGER,
+            upstream_completion INTEGER,
+            cache_hit INTEGER,
+            cache_miss INTEGER
+        )"""
+    )
+    conn.execute(
+        "INSERT INTO requests (ts, tokens_before, tokens_after) VALUES ('t', 10, 5)"
+    )
+    conn.commit()
+    conn.close()
+
+    store = StatsStore(path)
+    # Old row survived the migration, with model implicitly NULL.
+    assert store.summary()["request_count"] == 1
+    old_row = store._conn.execute("SELECT model FROM requests").fetchone()
+    assert old_row[0] is None
+    # New writes on the migrated file get the model column normally.
+    entry = store.record(MSGS, [], model="deepseek-v4-pro")
+    new_row = store._conn.execute(
+        "SELECT model FROM requests WHERE id=?", (entry["id"],)
+    ).fetchone()
+    assert new_row[0] == "deepseek-v4-pro"
     store.close()

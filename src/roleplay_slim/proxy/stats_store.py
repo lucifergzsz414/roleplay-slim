@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS requests (
     upstream_prompt INTEGER,
     upstream_completion INTEGER,
     cache_hit INTEGER,
-    cache_miss INTEGER
+    cache_miss INTEGER,
+    model TEXT
 )
 """
 
@@ -54,7 +55,17 @@ class StatsStore:
             )
             self._conn = sqlite3.connect(":memory:", check_same_thread=False)
         self._conn.execute(_SCHEMA)
+        self._migrate_add_model_column()
         self._conn.commit()
+
+    def _migrate_add_model_column(self) -> None:
+        """A stats.db created before this column existed won't have it —
+        CREATE TABLE IF NOT EXISTS doesn't retrofit existing tables. Same
+        migration story as stats-persistence.md's convo_key note: schema is
+        fixed at v1, new columns are a plain ALTER TABLE, applied once."""
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(requests)")}
+        if "model" not in cols:
+            self._conn.execute("ALTER TABLE requests ADD COLUMN model TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -64,16 +75,21 @@ class StatsStore:
         row = self._conn.execute("SELECT COUNT(*) FROM requests").fetchone()
         return int(row[0])
 
-    def record(self, before: list[dict], after: list[dict]) -> dict:
+    def record(self, before: list[dict], after: list[dict], model: str | None = None) -> dict:
         """Record one request; returns the same entry shape CompressionStats
         produced (plus the row's ``id``) so the proxy's logging stays
         untouched while giving the caller a precise handle for record_usage().
+
+        ``model`` is the upstream model this request targeted (the incoming
+        request body's own ``model`` field, passed through as-is) — stored so
+        a consumer with per-model pricing can compute real cost per row
+        instead of assuming every request used the same tier.
         """
         before_tok = estimate_messages_tokens(before)
         after_tok = estimate_messages_tokens(after)
         cursor = self._conn.execute(
-            "INSERT INTO requests (ts, tokens_before, tokens_after) VALUES (?, ?, ?)",
-            (datetime.now().isoformat(timespec="seconds"), before_tok, after_tok),
+            "INSERT INTO requests (ts, tokens_before, tokens_after, model) VALUES (?, ?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), before_tok, after_tok, model),
         )
         self._conn.commit()
         return {
