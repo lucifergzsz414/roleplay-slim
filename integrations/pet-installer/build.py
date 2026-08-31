@@ -132,6 +132,14 @@ def _build_tk_exe(
     # confuses the PyInstaller import analyser)
     for dep in deps:
         cmd.extend(["--add-data", f"{dep}{os.pathsep}{dep.parent.name}"])
+        # Also put the patch module's own directory on PyInstaller's build
+        # search path. Without this, `--hidden-import <patch>` below can't
+        # resolve the module, so PyInstaller never analyses it and never
+        # bundles its real dependencies — found via Cyrene's installer
+        # crashing with `No module named 'json'` on another machine: the
+        # entry script doesn't import json, only patch_cyrene.py does, so
+        # json was left out of the frozen bundle entirely.
+        cmd.extend(["--paths", str(dep.parent)])
 
     # Hidden imports that PyInstaller might miss
     cmd.extend(["--hidden-import", hidden_import])
