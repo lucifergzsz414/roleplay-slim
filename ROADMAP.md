@@ -15,7 +15,7 @@ the reasoning, trade-offs, and what was deliberately cut from scope.
 | CI: ruff lint + sdist packaging gate | — (see `gotchas.md`) | 0.4.0 |
 | Real-shape validation for the prefix optimizer (`tests/test_optimizer_real_shape.py`) — synthetic corpus matching real observed traffic structure, no real content | [`prefix-optimizer.md`](docs/designs/prefix-optimizer.md) | 0.4.1 |
 | `StatsStore` usage-attribution race fix — see CHANGELOG | — | 0.4.1 |
-| Semantic-cache design review — original proposal conflated two things; the money-saving half (caching LLM replies) rejected outright, the CPU-saving half left undocumented pending real profiling evidence | [`semantic-cache.md`](docs/designs/semantic-cache.md) | Unreleased |
+| Semantic-cache design review — original proposal conflated two things; the money-saving half (caching LLM replies) rejected outright, the CPU-saving half profiled (p99 46.5us vs. ~2s LLM round trip) and closed as not worth doing | [`semantic-cache.md`](docs/designs/semantic-cache.md) | Unreleased |
 | Telegram adapter (`examples/telegram_bot.py`) and a generic OpenAI-compatible / OpenWebUI-style adapter (`examples/openwebui_style_adapter.py`) | — | Unreleased |
 | Per-request `model` recorded in `StatsStore` | [`per-request-model.md`](docs/designs/per-request-model.md) | Unreleased |
 

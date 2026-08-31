@@ -8,6 +8,16 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/designs/semantic-cache.md` Direction A (caching `compress()`
+  output) closed with real profiling data instead of left open pending it:
+  `benchmark/profile_compress.py` measured p99 46.5us against a
+  real-traffic-shaped corpus (2000 samples, same structural parameters as
+  `tests/test_optimizer_real_shape.py`) — 0.0023% of a typical ~2s upstream
+  LLM round trip. Not adding a result cache; not revisiting unless
+  `compress()`'s own implementation changes by orders of magnitude.
+
 ### Added
 
 - `StatsStore.record()` now takes an optional `model` and persists it per
