@@ -18,6 +18,7 @@ the reasoning, trade-offs, and what was deliberately cut from scope.
 | Semantic-cache design review — original proposal conflated two things; the money-saving half (caching LLM replies) rejected outright, the CPU-saving half profiled (p99 46.5us vs. ~2s LLM round trip) and closed as not worth doing | [`semantic-cache.md`](docs/designs/semantic-cache.md) | Unreleased |
 | Telegram adapter (`examples/telegram_bot.py`) and a generic OpenAI-compatible / OpenWebUI-style adapter (`examples/openwebui_style_adapter.py`) | — | Unreleased |
 | Per-request `model` recorded in `StatsStore` | [`per-request-model.md`](docs/designs/per-request-model.md) | Unreleased |
+| `/stats?window=N` recent-N view (real recent effect visible instead of diluted by the all-time average) | [`stats-window.md`](docs/designs/stats-window.md) | Unreleased |
 
 Each design doc records where the shipped implementation deliberately
 diverged from the original proposal (usually: cutting scope that turned out

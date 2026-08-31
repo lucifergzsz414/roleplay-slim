@@ -8,6 +8,16 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ## [Unreleased]
 
+### Added
+
+- `GET /stats?window=N` returns a nested `recent` block with the same
+  figures computed over only the last `N` requests, so a real recent
+  effect (a burst of duplicate-footer traffic, or a cache-hit decline as
+  a conversation grows) is visible instead of being diluted by the
+  all-time average. Purely additive — the top-level fields are
+  byte-identical with or without `window`. Design + real-data validation
+  in `docs/designs/stats-window.md`.
+
 ### Fixed
 
 - `/stats`' upstream block was permanently `null` for every streaming
