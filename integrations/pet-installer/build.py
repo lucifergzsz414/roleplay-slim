@@ -13,6 +13,10 @@ Usage (run from this directory, integrations/pet-installer/):
     python build.py --installer-only   # only the installer
     python build.py --proxy-only       # only the proxy
     python build.py --zip              # build + package into dist/ zip
+    python build.py --bandori-only     # BandoriPet installer + uninstaller
+    python build.py --bandori-zip      # + package into dist/ zip
+    python build.py --cyrene-only      # Cyrene-Agent installer + uninstaller
+    python build.py --cyrene-zip       # + package into dist/ zip
 
 Requirements:
     pip install pyinstaller
@@ -57,6 +61,18 @@ BANDORI_INSTALLER_EXE_NAME = "BandoriPet安装器.exe"
 BANDORI_UNINSTALLER_EXE_NAME = "BandoriPet卸载还原器.exe"
 BANDORI_ZIP_NAME = "邦多利桌宠-上下文优化代理.zip"
 BANDORI_README_SRC = ROOT / "使用说明_BandoriPet.txt"
+
+# Cyrene-Agent (Electron) — same proxy exe, own port (8793) and own
+# installer since it patches a JSON settings file instead of index.html.
+CYRENE_INSTALLER_SRC = ROOT / "install_cyrene_gui.py"
+CYRENE_UNINSTALLER_SRC = ROOT / "uninstall_cyrene_gui.py"
+CYRENE_INSTALLER_DIR = ROOT / "installer_cyrene"
+CYRENE_DEPS = [CYRENE_INSTALLER_DIR / "patch_cyrene.py"]
+
+CYRENE_INSTALLER_EXE_NAME = "Cyrene安装器.exe"
+CYRENE_UNINSTALLER_EXE_NAME = "Cyrene卸载还原器.exe"
+CYRENE_ZIP_NAME = "Cyrene桌宠-上下文优化代理.zip"
+CYRENE_README_SRC = ROOT / "使用说明_Cyrene.txt"
 
 
 def pyinstaller_available() -> bool:
@@ -167,6 +183,22 @@ def build_bandori_uninstaller() -> Path:
     )
 
 
+def build_cyrene_installer() -> Path:
+    """Build the Cyrene-Agent GUI installer as a single-file .exe."""
+    return _build_tk_exe(
+        CYRENE_INSTALLER_SRC, "Cyrene安装器", CYRENE_INSTALLER_EXE_NAME,
+        "cyrene_installer", CYRENE_DEPS, "patch_cyrene",
+    )
+
+
+def build_cyrene_uninstaller() -> Path:
+    """Build the Cyrene-Agent GUI uninstaller as a single-file .exe."""
+    return _build_tk_exe(
+        CYRENE_UNINSTALLER_SRC, "Cyrene卸载还原器", CYRENE_UNINSTALLER_EXE_NAME,
+        "cyrene_uninstaller", CYRENE_DEPS, "patch_cyrene",
+    )
+
+
 def build_proxy() -> Path:
     """Build the compression proxy as a single-file .exe."""
     step("Building roleplay-slim-proxy.exe")
@@ -260,13 +292,19 @@ def main() -> None:
     bandori_only = "--bandori-only" in sys.argv  # both bandori exes, no proxy rebuild
     do_bandori_zip = "--bandori-zip" in sys.argv
 
+    cyrene_installer_only = "--cyrene-installer-only" in sys.argv
+    cyrene_uninstaller_only = "--cyrene-uninstaller-only" in sys.argv
+    cyrene_only = "--cyrene-only" in sys.argv  # both cyrene exes, no proxy rebuild
+    do_cyrene_zip = "--cyrene-zip" in sys.argv
+
     any_only = (
         installer_only or uninstaller_only or proxy_only
         or bandori_installer_only or bandori_uninstaller_only or bandori_only
+        or cyrene_installer_only or cyrene_uninstaller_only or cyrene_only
     )
     # Only rebuild the default Mutsumi trio if a build flag is explicitly
     # given, AND zip-only doesn't imply rebuild.
-    want_build = any_only or (not do_zip and not do_bandori_zip)
+    want_build = any_only or (not do_zip and not do_bandori_zip and not do_cyrene_zip)
     both = want_build and not any_only
 
     if not pyinstaller_available():
@@ -281,6 +319,8 @@ def main() -> None:
     proxy = None
     bandori_installer = None
     bandori_uninstaller = None
+    cyrene_installer = None
+    cyrene_uninstaller = None
 
     if installer_only or both:
         installer = build_installer()
@@ -296,6 +336,12 @@ def main() -> None:
 
     if bandori_uninstaller_only or bandori_only:
         bandori_uninstaller = build_bandori_uninstaller()
+
+    if cyrene_installer_only or cyrene_only:
+        cyrene_installer = build_cyrene_installer()
+
+    if cyrene_uninstaller_only or cyrene_only:
+        cyrene_uninstaller = build_cyrene_uninstaller()
 
     if do_zip:
         if not installer:
@@ -332,6 +378,23 @@ def main() -> None:
             sys.exit(1)
         package_zip(BANDORI_ZIP_NAME, [bandori_installer, bandori_uninstaller, proxy], BANDORI_README_SRC)
 
+    if do_cyrene_zip:
+        if not cyrene_installer:
+            cyrene_installer = DIST / CYRENE_INSTALLER_EXE_NAME
+        if not cyrene_uninstaller:
+            cyrene_uninstaller = DIST / CYRENE_UNINSTALLER_EXE_NAME
+        if not proxy:
+            proxy = DIST / PROXY_EXE_NAME
+        if not cyrene_installer.is_file() or not cyrene_uninstaller.is_file() or not proxy.is_file():
+            print("[X] Cyrene installer/uninstaller + proxy exe must all exist to package zip.")
+            sys.exit(1)
+        if not CYRENE_README_SRC.is_file():
+            print(f"[X] {CYRENE_README_SRC.name} is missing — private pet-distribution content, "
+                  "not part of the open-source repo.")
+            print("    Provide your own copy before packaging the zip.")
+            sys.exit(1)
+        package_zip(CYRENE_ZIP_NAME, [cyrene_installer, cyrene_uninstaller, proxy], CYRENE_README_SRC)
+
     print(f"\n{'=' * 55}")
     print("  Done!")
     if installer:
@@ -344,10 +407,16 @@ def main() -> None:
         print(f"  Bandori安装器: {bandori_installer}")
     if bandori_uninstaller:
         print(f"  Bandori卸载器: {bandori_uninstaller}")
+    if cyrene_installer:
+        print(f"  Cyrene安装器:  {cyrene_installer}")
+    if cyrene_uninstaller:
+        print(f"  Cyrene卸载器:  {cyrene_uninstaller}")
     if do_zip:
         print(f"  分发包:      {DIST / ZIP_NAME}")
     if do_bandori_zip:
         print(f"  Bandori分发包: {DIST / BANDORI_ZIP_NAME}")
+    if do_cyrene_zip:
+        print(f"  Cyrene分发包:  {DIST / CYRENE_ZIP_NAME}")
     print(f"{'=' * 55}")
 
 
