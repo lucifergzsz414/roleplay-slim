@@ -8,6 +8,7 @@ so non-JSON error pages from CDNs and gateways don't cause a proxy-side 500.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -148,9 +149,42 @@ def _passthrough_response(resp: httpx.Response) -> Response:
     )
 
 
+def _record_usage_dict(stats: StatsStore, usage: object, row_id: int) -> None:
+    """Shared tail end of usage recording — hand a parsed `usage` dict (from
+    either a plain JSON response or a sniffed SSE chunk) to stats and log
+    the result. Any failure is swallowed — telemetry must never turn a
+    successful upstream call into a proxy error.
+
+    Deliberately synchronous (not offloaded to a thread pool): StatsStore
+    holds one sqlite3.Connection shared across every request, currently
+    touched only from this single event-loop thread, which asyncio's
+    cooperative scheduling already serializes for free. Moving this call
+    into a thread pool would make that connection genuinely
+    multi-threaded — sqlite3's check_same_thread=False permits that but
+    does not make it safe on its own — to save a sub-millisecond single-row
+    UPDATE. Not worth the new lock this would require until profiling ever
+    shows this is a measured bottleneck (see benchmark/profile_compress.py
+    in the roleplay-slim repo for the standard this project holds itself to
+    before adding that kind of complexity).
+    """
+    try:
+        recorded = stats.record_usage(usage, row_id)
+    except Exception:  # pragma: no cover - record_usage is already tolerant
+        logger.exception("failed to record upstream usage")
+        return
+    if recorded:
+        logger.info(
+            "upstream usage | prompt:%s completion:%s cache_hit:%s cache_miss:%s",
+            recorded["prompt_tokens"],
+            recorded["completion_tokens"],
+            recorded["prompt_cache_hit_tokens"],
+            recorded["prompt_cache_miss_tokens"],
+        )
+
+
 def _record_upstream_usage(stats: StatsStore, resp: httpx.Response, row_id: int) -> None:
-    """Pull the provider-reported `usage` block out of a completed upstream
-    response and hand it to stats.
+    """Pull the provider-reported `usage` block out of a completed
+    non-streaming upstream response and hand it to stats.
 
     Why this matters: everything else in /stats is an *estimate* produced
     by running an OpenAI tokenizer over text destined for some other
@@ -163,8 +197,7 @@ def _record_upstream_usage(stats: StatsStore, resp: httpx.Response, row_id: int)
     Strictly best-effort and side-effect-free with respect to the response:
     the body is already fully in memory (a non-streaming httpx response),
     so reading it here does not disturb the passthrough that follows. Any
-    failure is swallowed — telemetry must never turn a successful upstream
-    call into a proxy error.
+    failure is swallowed for the same reason as _record_usage_dict.
     """
     if resp.status_code != 200:
         return
@@ -179,19 +212,47 @@ def _record_upstream_usage(stats: StatsStore, resp: httpx.Response, row_id: int)
         return
     if not isinstance(payload, dict):
         return
+    _record_usage_dict(stats, payload.get("usage"), row_id)
+
+
+# A real usage-bearing SSE line is a couple hundred bytes at most. If a
+# single line (no '\n' seen yet) grows past this, something upstream is
+# not speaking the expected SSE line-per-event framing — stop trying to
+# parse this stream's usage rather than buffering it without bound. This
+# never affects what gets forwarded to the client; only usage-sniffing.
+_SSE_LINE_BUFFER_CAP = 1 << 20  # 1 MiB
+
+
+def _try_parse_sse_usage(line: str) -> dict | None:
+    """Return the `usage` dict from one SSE `data: ...` line, or None.
+
+    Every OpenAI-compatible provider this project targets (DeepSeek and the
+    others openai-adapter.ts in a real client lists) emits one complete
+    JSON object per `data:` line — never a value split across multiple
+    `data:` lines the way the SSE spec technically allows for multi-line
+    fields. Handling that theoretical case would add real complexity for a
+    shape none of these providers actually produce, so this deliberately
+    doesn't.
+    """
+    line = line.strip()
+    if not line.startswith("data:"):
+        return None
+    payload = line[len("data:"):].strip()
+    if not payload or payload == "[DONE]":
+        return None
     try:
-        recorded = stats.record_usage(payload.get("usage"), row_id)
-    except Exception:  # pragma: no cover - record_usage is already total
-        logger.exception("failed to record upstream usage")
-        return
-    if recorded:
-        logger.info(
-            "upstream usage | prompt:%s completion:%s cache_hit:%s cache_miss:%s",
-            recorded["prompt_tokens"],
-            recorded["completion_tokens"],
-            recorded["prompt_cache_hit_tokens"],
-            recorded["prompt_cache_miss_tokens"],
-        )
+        obj = json.loads(payload)
+    except Exception:
+        # Not every provider necessarily sends JSON on every data: line
+        # (some send SSE comments or keep-alives) — not our problem to
+        # flag, this stream's bytes are already on their way to the client
+        # unchanged regardless of whether we could make sense of them.
+        return None
+    if isinstance(obj, dict):
+        usage = obj.get("usage")
+        if isinstance(usage, dict):
+            return usage
+    return None
 
 
 def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
@@ -353,12 +414,47 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
             )
 
         async def stream_upstream() -> AsyncIterator[bytes]:
+            # Forwarding is byte-for-byte unaffected by anything below —
+            # every branch here only ever reads what's already been
+            # yielded. aiter_text() (not aiter_bytes()) is deliberate: httpx
+            # runs an incremental UTF-8 decoder under the hood, so a
+            # multi-byte character split across two network chunks decodes
+            # correctly instead of needing to be hand-rolled here. SSE
+            # bodies from every provider this proxy targets are UTF-8
+            # text/event-stream, so re-encoding what aiter_text() hands
+            # back reproduces the original bytes.
+            line_buffer = ""
+            last_usage: dict | None = None
             try:
-                async for chunk in resp.aiter_bytes():
-                    yield chunk
+                async for text_chunk in resp.aiter_text():
+                    yield text_chunk.encode("utf-8")
+                    line_buffer += text_chunk
+                    if len(line_buffer) > _SSE_LINE_BUFFER_CAP:
+                        # Give up parsing this stream's usage rather than
+                        # buffering an unbounded line — the client already
+                        # has everything forwarded regardless.
+                        line_buffer = ""
+                        continue
+                    while "\n" in line_buffer:
+                        line, line_buffer = line_buffer.split("\n", 1)
+                        usage = _try_parse_sse_usage(line)
+                        if usage is not None:
+                            # The stream's *last* usage-bearing line is the
+                            # authoritative one if a provider ever sends
+                            # more than one — keep overwriting rather than
+                            # stopping at the first.
+                            last_usage = usage
             except httpx.HTTPError as e:
                 logger.warning("upstream stream interrupted: %s", e)
             finally:
+                # A final usage-bearing line with no trailing newline would
+                # otherwise sit unparsed in line_buffer forever.
+                if line_buffer:
+                    usage = _try_parse_sse_usage(line_buffer)
+                    if usage is not None:
+                        last_usage = usage
+                if last_usage is not None:
+                    _record_usage_dict(stats, last_usage, entry["id"])
                 await resp.aclose()
 
         resp_headers = {

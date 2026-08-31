@@ -185,6 +185,102 @@ def test_streaming_passthrough_is_not_corrupted():
     assert b"delta" in body
 
 
+def test_streaming_usage_is_recorded_in_stats():
+    """The core gap this closes: streaming responses used to leave
+    /stats' upstream block permanently null, because the proxy never
+    parsed anything out of the SSE bytes it was passing through — even
+    though the final chunk (when the client asks for stream_options.
+    include_usage, which every real client this project targets does)
+    carries the same `usage` block a non-streaming response's body has."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        chunks = [
+            b'data: {"choices": [{"delta": {"content": "hi"}}]}\n\n',
+            b'data: {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 4, '
+            b'"prompt_cache_hit_tokens": 6, "prompt_cache_miss_tokens": 4}}\n\n',
+            b"data: [DONE]\n\n",
+        ]
+        return httpx.Response(200, content=b"".join(chunks), headers={"content-type": "text/event-stream"})
+
+    client = _make_client(handler)
+    with client.stream("POST", "/v1/chat/completions", json=_sample_body(stream=True)) as resp:
+        b"".join(resp.iter_bytes())  # drain
+
+    stats = client.get("/stats").json()
+    assert stats["upstream"]["usage_sample_count"] == 1
+    assert stats["upstream"]["prompt_tokens_total"] == 10
+    assert stats["upstream"]["completion_tokens_total"] == 4
+    assert stats["upstream"]["cache_hit_tokens_total"] == 6
+
+
+def test_streaming_usage_records_the_last_chunk_not_the_first():
+    """If a provider ever emits more than one usage-bearing line in a
+    single stream, the last one is authoritative (it reflects the final
+    token count once generation actually finished) — an earlier one could
+    in principle be a provisional/incomplete figure."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        chunks = [
+            b'data: {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 1}}\n\n',
+            b'data: {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 9}}\n\n',
+            b"data: [DONE]\n\n",
+        ]
+        return httpx.Response(200, content=b"".join(chunks), headers={"content-type": "text/event-stream"})
+
+    client = _make_client(handler)
+    with client.stream("POST", "/v1/chat/completions", json=_sample_body(stream=True)) as resp:
+        b"".join(resp.iter_bytes())
+
+    stats = client.get("/stats").json()
+    assert stats["upstream"]["completion_tokens_total"] == 9
+
+
+def test_streaming_usage_survives_a_line_split_across_network_chunks():
+    """SSE bytes don't arrive pre-aligned to line boundaries — a real
+    network chunk boundary can land in the middle of a `data: {...}` JSON
+    object (and, separately, in the middle of a multi-byte UTF-8
+    character). Both must still be parsed correctly since the proxy
+    buffers text across chunks rather than parsing each chunk in
+    isolation."""
+    async def stream_gen():
+        # Split both a plain-ASCII JSON line AND a multi-byte UTF-8
+        # character (in "内" = E5 86 85) across chunk boundaries.
+        yield 'data: {"choices": [{"delta": {"content": "五'.encode("utf-8")
+        yield "内".encode("utf-8")[:1]  # first byte of a 3-byte UTF-8 char
+        yield "内".encode("utf-8")[1:] + '"}}]}\n\n'.encode("utf-8")
+        yield b'data: {"choices": [], "usage": {"prompt_tokens": 7, '
+        yield b'"completion_tokens": 2}}\n\n'
+        yield b"data: [DONE]\n\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=stream_gen(), headers={"content-type": "text/event-stream"})
+
+    client = _make_client(handler)
+    with client.stream("POST", "/v1/chat/completions", json=_sample_body(stream=True)) as resp:
+        body = b"".join(resp.iter_bytes())
+
+    # Forwarding must still be byte-perfect despite the mid-character split.
+    assert "五内".encode("utf-8") in body
+
+    stats = client.get("/stats").json()
+    assert stats["upstream"]["completion_tokens_total"] == 2
+
+
+def test_streaming_usage_absent_leaves_upstream_stats_null():
+    """A provider that never sends stream_options.include_usage (or a
+    client that never asked for it) must not make /stats lie about having
+    a measurement — see upstream_summary()'s "None means no measurement,
+    not measured zero" contract."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        chunks = [b'data: {"choices": [{"delta": {"content": "hi"}}]}\n\n', b"data: [DONE]\n\n"]
+        return httpx.Response(200, content=b"".join(chunks), headers={"content-type": "text/event-stream"})
+
+    client = _make_client(handler)
+    with client.stream("POST", "/v1/chat/completions", json=_sample_body(stream=True)) as resp:
+        b"".join(resp.iter_bytes())
+
+    stats = client.get("/stats").json()
+    assert stats["upstream"] is None
+
+
 def test_streaming_propagates_real_upstream_error_status():
     """A non-2xx upstream response for a streaming request must reach the
     caller with the real status code, not a hardcoded 200 — the caller

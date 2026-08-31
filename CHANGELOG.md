@@ -8,6 +8,22 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ## [Unreleased]
 
+### Fixed
+
+- `/stats`' upstream block was permanently `null` for every streaming
+  request (`stream: true`) — the vast majority of real chat client
+  traffic — because the proxy only ever parsed `usage` out of a
+  non-streaming JSON body and passed streaming SSE bytes through
+  unparsed. The final SSE chunk already carries the same `usage` block
+  when the client sets `stream_options.include_usage` (every client this
+  project targets does), so `stream_upstream()` now sniffs it out of the
+  `data: ...` lines it's already forwarding — via `httpx`'s own
+  incremental-UTF-8 `aiter_text()`, so a multi-byte character or a JSON
+  object split across network chunk boundaries still parses correctly —
+  without changing a single byte of what reaches the client. If more than
+  one usage-bearing line appears, the last one wins. Forwarding is
+  unaffected either way; this is purely a telemetry-side addition.
+
 ### Changed
 
 - `docs/designs/semantic-cache.md` Direction A (caching `compress()`
