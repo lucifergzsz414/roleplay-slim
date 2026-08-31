@@ -18,3 +18,8 @@ readme-polish-round3-log.md
 # Personal utility scripts (deleted, prevent re-add)
 _r.py
 _read_img.py
+
+# Private pet-distribution readmes — build.py --*-zip requires them to be
+# present locally but treats them as private distribution content, not part
+# of the public repo (see the CYRENE_README_SRC / BANDORI_README_SRC notes).
+使用说明*.txt
