@@ -302,8 +302,19 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
         return {"status": "ok"}
 
     @app.get("/stats")
-    async def get_stats():
-        return stats.summary()
+    async def get_stats(window: int | None = None):
+        result = stats.summary()
+        if window is not None:
+            if window <= 0:
+                return JSONResponse(
+                    {"error": {"message": "window must be a positive integer"}}, status_code=400
+                )
+            # Nested under "recent" rather than replacing the top-level
+            # fields — every existing consumer of the all-time numbers
+            # (including this project's own tests) keeps working
+            # unchanged; window=N is purely additive.
+            result["recent"] = stats.summary(window=window)
+        return result
 
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):

@@ -58,6 +58,35 @@ def test_stats_starts_at_zero():
     assert resp.json()["request_count"] == 0
 
 
+def test_stats_window_param_adds_recent_block_without_changing_top_level():
+    """?window=N is purely additive — the existing top-level fields (what
+    every current consumer, including the other tests in this file, reads)
+    must be byte-identical to the no-window response; window=N only adds
+    a nested "recent" block."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client = _make_client(handler)
+    client.post("/v1/chat/completions", json=_sample_body())
+    client.post("/v1/chat/completions", json=_sample_body())
+
+    plain = client.get("/stats").json()
+    windowed = client.get("/stats", params={"window": 1}).json()
+
+    assert "recent" not in plain
+    without_recent = {k: v for k, v in windowed.items() if k != "recent"}
+    assert without_recent == plain
+    assert windowed["recent"]["request_count"] == 1
+
+
+def test_stats_window_must_be_positive():
+    client = _make_client(lambda request: httpx.Response(200, json={}))
+    resp = client.get("/stats", params={"window": 0})
+    assert resp.status_code == 400
+    resp = client.get("/stats", params={"window": -3})
+    assert resp.status_code == 400
+
+
 def test_chat_completions_sends_compressed_messages_upstream():
     captured = {}
 
