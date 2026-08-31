@@ -178,21 +178,28 @@ def patch_model_settings(settings_path: Path, port: int, log=None) -> bool | Non
     data = json.loads(settings_path.read_text(encoding="utf-8"))
     provider = data.get("provider") or DEFAULT_PROVIDER
     current_base = data.get("baseUrl", "")
+    per_provider = data.setdefault("perProvider", {})
+    profile = per_provider.setdefault(provider, {})
+    current_transport = data.get("explicitTransport") or profile.get("explicitTransport")
 
-    if current_base.startswith(f"http://127.0.0.1:{port}"):
-        log(f"  [info] baseUrl 已经指向本地代理 (127.0.0.1:{port})，跳过")
+    already_routed = current_base.startswith(f"http://127.0.0.1:{port}")
+    if already_routed and current_transport == "openai":
+        log(f"  [info] baseUrl 已指向本地代理且 transport 已是 openai，跳过")
         return False
 
     data["baseUrl"] = proxy_base
-    per_provider = data.setdefault("perProvider", {})
-    profile = per_provider.setdefault(provider, {})
     profile["baseUrl"] = proxy_base
-    # Never overwrite an existing model/apiKey/transport — only fill in if
-    # genuinely absent (e.g. the fresh-file branch's twin for an existing
-    # file that somehow lacks a perProvider entry for its own provider).
+    # model/apiKey are preserved untouched, but the transport is FORCED to
+    # openai rather than left alone: roleplay-slim only understands
+    # /v1/chat/completions (it does no Anthropic↔OpenAI translation). An
+    # existing profile that kept Cyrene's DeepSeek-preset "anthropic"
+    # transport would keep sending /v1/messages, which the proxy forwards to
+    # a nonexistent upstream path and the provider rejects with 401 (the
+    # exact failure the frozen installer hit on a second machine).
     profile.setdefault("model", data.get("model", DEFAULT_MODEL))
     profile.setdefault("apiKey", data.get("apiKey", ""))
-    profile.setdefault("explicitTransport", "openai")
+    profile["explicitTransport"] = "openai"
+    data["explicitTransport"] = "openai"
 
     tmp_path = settings_path.with_name("_" + settings_path.name + ".tmp")
     tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
