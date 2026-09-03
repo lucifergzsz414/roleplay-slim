@@ -19,6 +19,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from ..anthropic_proxy import compress_anthropic_messages, estimate_anthropic_messages_chars
 from ..compressor import compress
 from ..config import ProxyConfig
 from .stats_store import StatsStore
@@ -133,6 +134,117 @@ def _build_upstream_headers(
         else (f"Bearer {api_key}" if api_key else "")
     )
     return headers
+
+
+def _check_client_auth_anthropic(
+    incoming_x_api_key: str | None, config: ProxyConfig, client_auth_token: str
+) -> tuple[JSONResponse | None, str | None]:
+    """Same purpose as `_check_client_auth`, kept as a separate function
+    rather than a shared one: Anthropic clients authenticate to the proxy
+    with a bare `x-api-key: <token>` value, not an `Authorization: Bearer
+    <token>` header, so the credential-matching shape genuinely differs —
+    reusing `_allowed_client_tokens`'s `"Bearer " + token` set here would
+    require every caller to carry a header prefix Anthropic clients never
+    send. Returns (error_response, forwardable_key) with the same contract
+    as `_check_client_auth`.
+    """
+    if not config.client_auth_token_env and not config.client_auth_tokens_extra:
+        return None, incoming_x_api_key
+
+    allowed = _allowed_client_tokens_anthropic(config, client_auth_token)
+    if not any(secrets.compare_digest(incoming_x_api_key or "", a) for a in allowed):
+        return (
+            JSONResponse(
+                {"error": {"message": "invalid or missing proxy credentials"}},
+                status_code=401,
+            ),
+            None,
+        )
+    return None, None
+
+
+def _allowed_client_tokens_anthropic(config: ProxyConfig, client_auth_token: str) -> set[str]:
+    """Anthropic-shape counterpart of `_allowed_client_tokens` — same token
+    sources, no `"Bearer "` prefix since `x-api-key` carries the raw value."""
+    allowed: set[str] = set()
+    if client_auth_token:
+        allowed.add(client_auth_token)
+    allowed.update(
+        t.strip()
+        for t in config.client_auth_tokens_extra.split(",")
+        if t.strip()
+    )
+    return allowed
+
+
+def _build_anthropic_upstream_headers(
+    request: Request, incoming_x_api_key: str | None, api_key: str
+) -> dict[str, str]:
+    """Anthropic-shape counterpart of `_build_upstream_headers`: forwards
+    every non-hop-by-hop header, then sets the two headers this route
+    controls — `x-api-key` (client's own value wins if present, same
+    "caller credential wins" precedent as the OpenAI route) and
+    `anthropic-version`, which Anthropic requires on every request and
+    which this proxy does not try to guess a "current" value for — a client
+    that cares which API version it's calling should say so explicitly, and
+    one that doesn't send it gets a well-known stable value rather than a
+    silently-broken request."""
+    headers = {
+        k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP_HEADERS
+    }
+    headers.pop("authorization", None)
+    headers["content-type"] = "application/json"
+    headers["x-api-key"] = incoming_x_api_key if incoming_x_api_key else api_key
+    headers.setdefault("anthropic-version", "2023-06-01")
+    return headers
+
+
+def _map_anthropic_usage(usage: dict) -> dict:
+    """Translate an Anthropic `usage` object into the OpenAI-shaped dict
+    `StatsStore.record_usage` already knows how to read, rather than
+    teaching that function a second field-name vocabulary.
+
+    Field semantics (verified against Anthropic's prompt-caching docs,
+    2026-09-03 — not guessed): `input_tokens` is *only* the tokens after the
+    last cache breakpoint, not the total. The docs give the identity
+    ``total_input_tokens = cache_read_input_tokens +
+    cache_creation_input_tokens + input_tokens``, so `prompt_tokens` here is
+    that sum, `prompt_cache_hit_tokens` is `cache_read_input_tokens`
+    (actually served from cache — the direct evidence this project's
+    caching claim rests on), and `prompt_cache_miss_tokens` is everything
+    else that had to be processed fresh (`input_tokens +
+    cache_creation_input_tokens`).
+    """
+    input_tokens = usage.get("input_tokens") or 0
+    cache_creation = usage.get("cache_creation_input_tokens") or 0
+    cache_read = usage.get("cache_read_input_tokens") or 0
+    return {
+        "prompt_tokens": input_tokens + cache_creation + cache_read,
+        "completion_tokens": usage.get("output_tokens"),
+        "prompt_cache_hit_tokens": cache_read,
+        "prompt_cache_miss_tokens": input_tokens + cache_creation,
+    }
+
+
+def _try_parse_anthropic_sse_event(line: str) -> dict | None:
+    """Return the parsed JSON object from one Anthropic SSE `data: ...`
+    line, or None. Unlike `_try_parse_sse_usage`, this returns the whole
+    event object (not just a `usage` sub-field) — the caller needs the
+    event `type` to know whether this event's `usage` is the
+    `message_start` baseline or a `message_delta` update, since Anthropic
+    splits usage across both rather than reporting it once at stream end.
+    """
+    line = line.strip()
+    if not line.startswith("data:"):
+        return None
+    payload = line[len("data:"):].strip()
+    if not payload:
+        return None
+    try:
+        obj = json.loads(payload)
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
 
 
 def _passthrough_response(resp: httpx.Response) -> Response:
@@ -474,6 +586,188 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
         }
         return StreamingResponse(
             stream_upstream(),
+            status_code=resp.status_code,
+            headers=resp_headers,
+            media_type=resp.headers.get("content-type", "text/event-stream"),
+        )
+
+    @app.post("/v1/messages")
+    async def anthropic_messages(request: Request):
+        """Anthropic-shape counterpart of /v1/chat/completions. See
+        anthropic_proxy.py's module docstring and
+        docs/designs/anthropic-protocol-support.md for why this is a
+        parallel native route rather than a translation layer bolted onto
+        the OpenAI one — no code here converts between the two formats.
+
+        404s outright when anthropic_upstream_base_url is unset (the
+        default) rather than guessing a path from upstream_base_url, which
+        is very often a different path on the same provider (see
+        ProxyConfig.anthropic_upstream_base_url's docstring) — silently
+        forwarding to a guessed-wrong path would produce a confusing
+        upstream 404/401 instead of a clear "this route isn't configured".
+        """
+        if not config.anthropic_upstream_base_url:
+            return JSONResponse(
+                {"error": {"message": "anthropic_upstream_base_url is not configured — "
+                                       "this proxy's /v1/messages route is disabled"}},
+                status_code=404,
+            )
+
+        incoming_x_api_key = request.headers.get("x-api-key")
+        auth_error, incoming_x_api_key = _check_client_auth_anthropic(
+            incoming_x_api_key, config, client_auth_token
+        )
+        if auth_error is not None:
+            return auth_error
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                {"error": {"message": "request body must be valid JSON"}},
+                status_code=400,
+            )
+        if not isinstance(body, dict):
+            return JSONResponse(
+                {"error": {"message": "request body must be a JSON object"}},
+                status_code=400,
+            )
+        messages = body.get("messages")
+        if not isinstance(messages, list):
+            return JSONResponse(
+                {"error": {"message": "messages must be an array"}},
+                status_code=400,
+            )
+        if messages and not all(isinstance(m, dict) for m in messages):
+            return JSONResponse(
+                {"error": {"message": "every message must be an object"}},
+                status_code=400,
+            )
+
+        try:
+            compressed = compress_anthropic_messages(
+                messages, config.anthropic_keep_recent_turns
+            )
+        except Exception:
+            logger.exception(
+                "anthropic compression failed for request #%d", stats.request_count + 1
+            )
+            return JSONResponse(
+                {"error": {"message": "internal error during compression"}},
+                status_code=500,
+            )
+
+        before_chars = estimate_anthropic_messages_chars(messages)
+        after_chars = estimate_anthropic_messages_chars(compressed)
+        pct = (before_chars - after_chars) / before_chars * 100 if before_chars else 0.0
+        logger.info(
+            "anthropic request #%d | %d -> %d chars (saved %.1f%%) | msgs:%d",
+            stats.request_count + 1,
+            before_chars,
+            after_chars,
+            pct,
+            len(messages),
+        )
+        # record_raw (not record()) — these are raw char counts, not
+        # OpenAI-shaped messages, so nothing here should be re-estimated via
+        # a tokenizer that assumes string/text-block content. Recorded
+        # through the same tokens_before/after columns the OpenAI route
+        # uses; stats.summary()'s percentage math is unit-agnostic (only
+        # ever computes before/after ratios), so this is honest as long as
+        # the two routes' numbers are never compared as if they were the
+        # same unit (chars vs. tokens).
+        _req_model = body.get("model")
+        entry = stats.record_raw(
+            before_chars, after_chars, model=_req_model if isinstance(_req_model, str) else None
+        )
+        body["messages"] = compressed
+
+        headers = _build_anthropic_upstream_headers(request, incoming_x_api_key, api_key)
+        upstream_url = f"{config.anthropic_upstream_base_url.rstrip('/')}/messages"
+        qs = request.url.query
+        if qs:
+            upstream_url = f"{upstream_url}?{qs}"
+
+        is_streaming = bool(body.get("stream"))
+        client: httpx.AsyncClient = request.app.state.client
+
+        if not is_streaming:
+            try:
+                resp = await client.post(upstream_url, json=body, headers=headers)
+            except httpx.HTTPError as e:
+                logger.warning("anthropic upstream request failed: %s", e)
+                return JSONResponse(
+                    {"error": {"message": f"upstream request failed: {e}"}}, status_code=502
+                )
+            if resp.status_code == 200 and "json" in resp.headers.get("content-type", "").lower():
+                try:
+                    payload = resp.json()
+                    if isinstance(payload, dict) and isinstance(payload.get("usage"), dict):
+                        _record_usage_dict(
+                            stats, _map_anthropic_usage(payload["usage"]), entry["id"]
+                        )
+                except Exception:
+                    pass
+            return _passthrough_response(resp)
+
+        upstream_request = client.build_request("POST", upstream_url, json=body, headers=headers)
+        try:
+            resp = await client.send(upstream_request, stream=True)
+        except httpx.HTTPError as e:
+            logger.warning("anthropic upstream streaming request failed: %s", e)
+            return JSONResponse(
+                {"error": {"message": f"upstream request failed: {e}"}}, status_code=502
+            )
+
+        async def stream_anthropic_upstream() -> AsyncIterator[bytes]:
+            # Same byte-for-byte-forwarding guarantee as the OpenAI stream
+            # handler: everything below only ever reads what's already been
+            # yielded. usage_acc starts from message_start's baseline and is
+            # updated (not replaced) by every message_delta's usage, since
+            # Anthropic splits usage across both events rather than
+            # reporting it once — see _map_anthropic_usage's docstring.
+            line_buffer = ""
+            usage_acc: dict = {}
+            try:
+                async for text_chunk in resp.aiter_text():
+                    yield text_chunk.encode("utf-8")
+                    line_buffer += text_chunk
+                    if len(line_buffer) > _SSE_LINE_BUFFER_CAP:
+                        line_buffer = ""
+                        continue
+                    while "\n" in line_buffer:
+                        line, line_buffer = line_buffer.split("\n", 1)
+                        event = _try_parse_anthropic_sse_event(line)
+                        if event is None:
+                            continue
+                        etype = event.get("type")
+                        if etype == "message_start":
+                            usage = event.get("message", {}).get("usage")
+                            if isinstance(usage, dict):
+                                usage_acc.update(usage)
+                        elif etype == "message_delta":
+                            usage = event.get("usage")
+                            if isinstance(usage, dict):
+                                usage_acc.update(usage)
+            except httpx.HTTPError as e:
+                logger.warning("anthropic upstream stream interrupted: %s", e)
+            finally:
+                if line_buffer:
+                    event = _try_parse_anthropic_sse_event(line_buffer)
+                    if event is not None and event.get("type") == "message_delta":
+                        usage = event.get("usage")
+                        if isinstance(usage, dict):
+                            usage_acc.update(usage)
+                if usage_acc:
+                    _record_usage_dict(stats, _map_anthropic_usage(usage_acc), entry["id"])
+                await resp.aclose()
+
+        resp_headers = {
+            k: v for k, v in resp.headers.items()
+            if k.lower() not in _HOP_BY_HOP_HEADERS
+        }
+        return StreamingResponse(
+            stream_anthropic_upstream(),
             status_code=resp.status_code,
             headers=resp_headers,
             media_type=resp.headers.get("content-type", "text/event-stream"),

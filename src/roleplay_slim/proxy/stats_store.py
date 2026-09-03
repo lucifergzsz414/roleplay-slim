@@ -99,6 +99,30 @@ class StatsStore:
             "saved": before_tok - after_tok,
         }
 
+    def record_raw(self, tokens_before: int, tokens_after: int, model: str | None = None) -> dict:
+        """Same DB effect as `record()`, but for callers that already have
+        their own before/after size numbers and must not have this class
+        re-derive them via `estimate_messages_tokens` (which assumes
+        OpenAI-shaped `content` — a string or a list of `{"type": "text"}`
+        blocks). The Anthropic route's char-based accounting is exactly
+        this case: routing it through `record()` with a synthetic message
+        would silently re-estimate a *different* number (tiktoken run over
+        placeholder characters, not the real char count), corrupting the
+        exact figures this project's stats claims are supposed to be built
+        on. Column semantics are otherwise identical to `record()`'s.
+        """
+        cursor = self._conn.execute(
+            "INSERT INTO requests (ts, tokens_before, tokens_after, model) VALUES (?, ?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), tokens_before, tokens_after, model),
+        )
+        self._conn.commit()
+        return {
+            "id": cursor.lastrowid,
+            "tokens_before": tokens_before,
+            "tokens_after": tokens_after,
+            "saved": tokens_before - tokens_after,
+        }
+
     def record_usage(self, usage: Any, row_id: int) -> dict | None:
         """Back-fill the request identified by ``row_id`` with the
         provider's usage figures.
