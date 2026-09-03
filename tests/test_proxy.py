@@ -1048,3 +1048,231 @@ def test_upstream_usage_survives_a_proxy_restart(tmp_path):
     assert upstream["prompt_tokens_total"] == 100
     assert upstream["cache_hit_tokens_total"] == 40
     assert upstream["cache_hit_pct"] == 40.0
+
+
+# ---------------------------------------------------------------------------
+# /v1/messages — Anthropic-shape route (parallel to /v1/chat/completions,
+# not a translation of it — see docs/designs/anthropic-protocol-support.md)
+# ---------------------------------------------------------------------------
+
+def _anthropic_body(stream: bool = False) -> dict:
+    return {
+        "model": "claude-test",
+        "stream": stream,
+        "system": "you are a helpful assistant",
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "q1"}]},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "checking"},
+                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "a.py"}},
+                ],
+            },
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "OLD OUTPUT " * 20}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "a1"}]},
+            {"role": "user", "content": [{"type": "text", "text": "final pending question"}]},
+        ],
+    }
+
+
+def test_anthropic_route_404s_when_not_configured():
+    """Default config leaves anthropic_upstream_base_url empty — the route
+    must refuse cleanly, not guess a path from upstream_base_url (which is
+    very often a different path on the same provider)."""
+    client = _make_client(lambda request: httpx.Response(200, json={}))
+    resp = client.post("/v1/messages", json=_anthropic_body())
+    assert resp.status_code == 404
+
+
+def _make_anthropic_client(handler, **overrides) -> TestClient:
+    config = ProxyConfig(
+        anthropic_upstream_base_url="https://example.test/anthropic/v1",
+        compressor=CompressorConfig(keep_recent_turns=1),
+        stats=StatsConfig(persist=False),
+        **overrides,
+    )
+    app = create_app(config, transport=httpx.MockTransport(handler))
+    return TestClient(app).__enter__()
+
+
+def test_anthropic_route_forwards_to_correct_upstream_path_and_headers():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["x-api-key"] = request.headers.get("x-api-key")
+        captured["anthropic-version"] = request.headers.get("anthropic-version")
+        captured["authorization"] = request.headers.get("authorization")
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+
+    import os
+
+    os.environ["TEST_UPSTREAM_KEY"] = "sk-configured"
+    try:
+        # create_app() reads upstream_api_key_env at creation time, so the
+        # env var must be set *before* the client (and its app) is built.
+        client = _make_anthropic_client(handler, upstream_api_key_env="TEST_UPSTREAM_KEY")
+        resp = client.post("/v1/messages", json=_anthropic_body())
+    finally:
+        del os.environ["TEST_UPSTREAM_KEY"]
+
+    assert resp.status_code == 200
+    assert captured["url"] == "https://example.test/anthropic/v1/messages"
+    assert captured["x-api-key"] == "sk-configured"
+    assert captured["anthropic-version"] == "2023-06-01"
+    assert captured["authorization"] is None  # never forwards Authorization on this route
+
+
+def test_anthropic_route_client_supplied_api_key_wins():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["x-api-key"] = request.headers.get("x-api-key")
+        return httpx.Response(200, json={})
+
+    client = _make_anthropic_client(handler)
+    client.post(
+        "/v1/messages",
+        json=_anthropic_body(),
+        headers={"x-api-key": "sk-client-own-key", "anthropic-version": "2024-01-01"},
+    )
+    assert captured["x-api-key"] == "sk-client-own-key"
+
+
+def test_anthropic_route_preserves_client_supplied_version_header():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["anthropic-version"] = request.headers.get("anthropic-version")
+        return httpx.Response(200, json={})
+
+    client = _make_anthropic_client(handler)
+    client.post("/v1/messages", json=_anthropic_body(), headers={"anthropic-version": "2024-01-01"})
+    assert captured["anthropic-version"] == "2024-01-01"
+
+
+def test_anthropic_route_system_field_forwarded_untouched():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={})
+
+    client = _make_anthropic_client(handler)
+    body = _anthropic_body()
+    client.post("/v1/messages", json=body)
+    assert captured["body"]["system"] == body["system"]
+
+
+def test_anthropic_route_trims_old_tool_result_before_forwarding():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={})
+
+    # keep_recent_turns=1 via anthropic_keep_recent_turns default (6) would
+    # keep this short 2-turn conversation entirely — force it down to 1 to
+    # actually exercise trimming in this small fixture.
+    client = _make_anthropic_client(handler, anthropic_keep_recent_turns=1)
+    client.post("/v1/messages", json=_anthropic_body())
+
+    forwarded_messages = captured["body"]["messages"]
+    tool_result_block = forwarded_messages[2]["content"][0]
+    assert tool_result_block["type"] == "tool_result"
+    assert tool_result_block["content"] == "[older tool output omitted by roleplay-slim]"
+    # The final (most recent) user turn is untouched
+    assert forwarded_messages[-1]["content"][0]["text"] == "final pending question"
+
+
+def test_anthropic_route_proxy_auth_rejects_missing_or_wrong_key():
+    import os
+
+    os.environ["TEST_ANTHROPIC_CLIENT_TOKEN"] = "secret-proxy-token"
+    try:
+        # Same ordering requirement as the api-key test above — the env var
+        # must exist before create_app() runs.
+        client = _make_anthropic_client(
+            lambda r: httpx.Response(200, json={}),
+            client_auth_token_env="TEST_ANTHROPIC_CLIENT_TOKEN",
+        )
+        no_key = client.post("/v1/messages", json=_anthropic_body())
+        wrong_key = client.post("/v1/messages", json=_anthropic_body(), headers={"x-api-key": "wrong"})
+        right_key = client.post(
+            "/v1/messages", json=_anthropic_body(), headers={"x-api-key": "secret-proxy-token"}
+        )
+    finally:
+        del os.environ["TEST_ANTHROPIC_CLIENT_TOKEN"]
+
+    assert no_key.status_code == 401
+    assert wrong_key.status_code == 401
+    assert right_key.status_code == 200
+
+
+def test_anthropic_route_records_usage_with_correct_field_mapping():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "content": [{"type": "text", "text": "ok"}],
+                "usage": {
+                    "input_tokens": 50,
+                    "cache_creation_input_tokens": 20,
+                    "cache_read_input_tokens": 1800,
+                    "output_tokens": 503,
+                },
+            },
+        )
+
+    client = _make_anthropic_client(handler)
+    client.post("/v1/messages", json=_anthropic_body())
+    upstream = client.get("/stats").json()["upstream"]
+
+    # total_input = input_tokens + cache_creation + cache_read (Anthropic's
+    # own documented identity, see _map_anthropic_usage's docstring)
+    assert upstream["prompt_tokens_total"] == 50 + 20 + 1800
+    assert upstream["completion_tokens_total"] == 503
+    assert upstream["cache_hit_tokens_total"] == 1800
+
+
+def test_anthropic_route_streaming_merges_usage_from_message_start_and_delta():
+    def handler(request: httpx.Request) -> httpx.Response:
+        chunks = [
+            b'event: message_start\n'
+            b'data: {"type": "message_start", "message": {"usage": {"input_tokens": 472, '
+            b'"cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 2}}}\n\n',
+            b'event: content_block_delta\n'
+            b'data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hi"}}\n\n',
+            b'event: message_delta\n'
+            b'data: {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, '
+            b'"usage": {"output_tokens": 89}}\n\n',
+            b'event: message_stop\ndata: {"type": "message_stop"}\n\n',
+        ]
+        return httpx.Response(200, content=b"".join(chunks), headers={"content-type": "text/event-stream"})
+
+    client = _make_anthropic_client(handler)
+    with client.stream("POST", "/v1/messages", json=_anthropic_body(stream=True)) as resp:
+        b"".join(resp.iter_bytes())
+
+    upstream = client.get("/stats").json()["upstream"]
+    # input side only ever appears in message_start; output side is
+    # overwritten by message_delta's cumulative final value (89, not 2)
+    assert upstream["prompt_tokens_total"] == 472
+    assert upstream["completion_tokens_total"] == 89
+
+
+def test_anthropic_route_streaming_forwards_bytes_unchanged():
+    raw_chunks = [
+        b'event: message_start\ndata: {"type": "message_start", "message": {"usage": {"input_tokens": 5}}}\n\n',
+        b'event: content_block_delta\ndata: {"type": "content_block_delta", "delta": {"text": "hello"}}\n\n',
+        b'event: message_stop\ndata: {"type": "message_stop"}\n\n',
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"".join(raw_chunks), headers={"content-type": "text/event-stream"})
+
+    client = _make_anthropic_client(handler)
+    with client.stream("POST", "/v1/messages", json=_anthropic_body(stream=True)) as resp:
+        received = b"".join(resp.iter_bytes())
+    assert received == b"".join(raw_chunks)
