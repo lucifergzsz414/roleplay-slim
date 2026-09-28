@@ -17,6 +17,8 @@ Usage (run from this directory, integrations/pet-installer/):
     python build.py --bandori-zip      # + package into dist/ zip
     python build.py --cyrene-only      # Cyrene-Agent installer + uninstaller
     python build.py --cyrene-zip       # + package into dist/ zip
+    python build.py --launcher-only    # universal launcher (ordinary-user facing)
+    python build.py --launcher-zip     # + package launcher + proxy into dist/ zip
 
 Requirements:
     pip install pyinstaller
@@ -74,6 +76,23 @@ CYRENE_UNINSTALLER_EXE_NAME = "Cyrene卸载还原器.exe"
 CYRENE_ZIP_NAME = "Cyrene桌宠-上下文优化代理.zip"
 CYRENE_README_SRC = ROOT / "使用说明_Cyrene.txt"
 
+# Universal launcher — unlike the three installers above (run once, patch one
+# app, exit), this one stays open, runs the proxy itself, and shows live
+# savings. It's the artifact aimed at ordinary users rather than at people
+# who already know what a proxy is, so it bundles all three patch modules
+# (its "one-click" path can target any adapted app) and defaults to a
+# copy-the-URL mode that works with anything OpenAI-compatible.
+LAUNCHER_SRC = ROOT.parent / "launcher" / "launcher_gui.py"
+LAUNCHER_DEPS = [
+    INSTALLER_DIR / "install.py",
+    BANDORI_INSTALLER_DIR / "patch_bandori.py",
+    CYRENE_INSTALLER_DIR / "patch_cyrene.py",
+]
+LAUNCHER_HIDDEN_IMPORTS = ["install", "patch_bandori", "patch_cyrene"]
+LAUNCHER_EXE_NAME = "roleplay-slim启动器.exe"
+LAUNCHER_ZIP_NAME = "roleplay-slim启动器.zip"
+LAUNCHER_README_SRC = ROOT / "使用说明_启动器.txt"
+
 
 def pyinstaller_available() -> bool:
     try:
@@ -103,7 +122,7 @@ def run(cmd: list[str], **kwargs) -> None:
 
 def _build_tk_exe(
     source: Path, name: str, exe_name: str, workdir_suffix: str,
-    deps: list[Path], hidden_import: str,
+    deps: list[Path], hidden_import: str | list[str],
 ) -> Path:
     """Shared PyInstaller invocation for the tkinter GUIs (installer,
     uninstaller, and their BandoriPet counterparts) — all of them bundle a
@@ -141,8 +160,12 @@ def _build_tk_exe(
         # json was left out of the frozen bundle entirely.
         cmd.extend(["--paths", str(dep.parent)])
 
-    # Hidden imports that PyInstaller might miss
-    cmd.extend(["--hidden-import", hidden_import])
+    # Hidden imports that PyInstaller might miss. The launcher needs several
+    # (it can patch any of the three adapted apps), the single-app installers
+    # need exactly one — both spellings accepted so neither has to carry a
+    # one-element list.
+    for _hidden in ([hidden_import] if isinstance(hidden_import, str) else hidden_import):
+        cmd.extend(["--hidden-import", _hidden])
 
     cmd.append(str(source))
 
@@ -204,6 +227,14 @@ def build_cyrene_uninstaller() -> Path:
     return _build_tk_exe(
         CYRENE_UNINSTALLER_SRC, "Cyrene卸载还原器", CYRENE_UNINSTALLER_EXE_NAME,
         "cyrene_uninstaller", CYRENE_DEPS, "patch_cyrene",
+    )
+
+
+def build_launcher() -> Path:
+    """Build the universal launcher as a single-file .exe."""
+    return _build_tk_exe(
+        LAUNCHER_SRC, "roleplay-slim启动器", LAUNCHER_EXE_NAME,
+        "launcher", LAUNCHER_DEPS, LAUNCHER_HIDDEN_IMPORTS,
     )
 
 
@@ -305,14 +336,20 @@ def main() -> None:
     cyrene_only = "--cyrene-only" in sys.argv  # both cyrene exes, no proxy rebuild
     do_cyrene_zip = "--cyrene-zip" in sys.argv
 
+    launcher_only = "--launcher-only" in sys.argv
+    do_launcher_zip = "--launcher-zip" in sys.argv
+
     any_only = (
         installer_only or uninstaller_only or proxy_only
         or bandori_installer_only or bandori_uninstaller_only or bandori_only
         or cyrene_installer_only or cyrene_uninstaller_only or cyrene_only
+        or launcher_only
     )
     # Only rebuild the default Mutsumi trio if a build flag is explicitly
     # given, AND zip-only doesn't imply rebuild.
-    want_build = any_only or (not do_zip and not do_bandori_zip and not do_cyrene_zip)
+    want_build = any_only or (
+        not do_zip and not do_bandori_zip and not do_cyrene_zip and not do_launcher_zip
+    )
     both = want_build and not any_only
 
     if not pyinstaller_available():
@@ -329,6 +366,7 @@ def main() -> None:
     bandori_uninstaller = None
     cyrene_installer = None
     cyrene_uninstaller = None
+    launcher = None
 
     if installer_only or both:
         installer = build_installer()
@@ -350,6 +388,23 @@ def main() -> None:
 
     if cyrene_uninstaller_only or cyrene_only:
         cyrene_uninstaller = build_cyrene_uninstaller()
+
+    if launcher_only:
+        launcher = build_launcher()
+
+    if do_launcher_zip:
+        if not launcher:
+            launcher = DIST / LAUNCHER_EXE_NAME
+        if not proxy:
+            proxy = DIST / PROXY_EXE_NAME
+        if not launcher.is_file() or not proxy.is_file():
+            print("[X] Launcher + proxy exe must both exist to package zip. Build them first "
+                  "(python build.py --launcher-only --proxy-only).")
+            sys.exit(1)
+        if not LAUNCHER_README_SRC.is_file():
+            print(f"[X] {LAUNCHER_README_SRC.name} is missing — write it before packaging.")
+            sys.exit(1)
+        package_zip(LAUNCHER_ZIP_NAME, [launcher, proxy], LAUNCHER_README_SRC)
 
     if do_zip:
         if not installer:
@@ -415,6 +470,8 @@ def main() -> None:
         print(f"  Bandori安装器: {bandori_installer}")
     if bandori_uninstaller:
         print(f"  Bandori卸载器: {bandori_uninstaller}")
+    if launcher:
+        print(f"  启动器:      {launcher}")
     if cyrene_installer:
         print(f"  Cyrene安装器:  {cyrene_installer}")
     if cyrene_uninstaller:
