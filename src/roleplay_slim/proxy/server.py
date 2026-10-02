@@ -8,18 +8,22 @@ so non-JSON error pages from CDNs and gateways don't cause a proxy-side 500.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from ..anthropic_proxy import compress_anthropic_messages, estimate_anthropic_messages_chars
+from ..anthropic_proxy import (
+    compress_anthropic_messages,
+    estimate_anthropic_messages_chars,
+)
 from ..compressor import compress
 from ..config import ProxyConfig
 from .stats_store import StatsStore
@@ -43,6 +47,31 @@ _HOP_BY_HOP_HEADERS = frozenset({
     "keep-alive", "upgrade", "proxy-authenticate", "proxy-authorization",
     "te", "trailers", "content-encoding",
 })
+
+_CONNECT_RETRY_DELAYS = (0.5, 1.5)
+_RETRYABLE_CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout)
+
+
+async def _send_with_connect_retry(
+    send: Callable[[], Awaitable[httpx.Response]],
+) -> httpx.Response:
+    """Retry failures that happen before an upstream connection is established.
+
+    Read/write/stream errors are deliberately excluded: once request bytes may
+    have reached the provider, retrying could duplicate billing or output.
+    """
+    for attempt, delay in enumerate(_CONNECT_RETRY_DELAYS, start=1):
+        try:
+            return await send()
+        except _RETRYABLE_CONNECT_ERRORS as exc:
+            logger.warning(
+                "upstream connect attempt %d failed (%s); retrying in %.1fs",
+                attempt,
+                type(exc).__name__,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    return await send()
 
 
 def _bearer_token(auth_header: str | None) -> str:
@@ -693,7 +722,9 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
 
         if not is_streaming:
             try:
-                resp = await client.post(upstream_url, json=body, headers=headers)
+                resp = await _send_with_connect_retry(
+                    lambda: client.post(upstream_url, json=body, headers=headers)
+                )
             except httpx.HTTPError as e:
                 logger.warning("anthropic upstream request failed: %s", e)
                 return JSONResponse(
@@ -710,9 +741,13 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                     pass
             return _passthrough_response(resp)
 
-        upstream_request = client.build_request("POST", upstream_url, json=body, headers=headers)
         try:
-            resp = await client.send(upstream_request, stream=True)
+            resp = await _send_with_connect_retry(
+                lambda: client.send(
+                    client.build_request("POST", upstream_url, json=body, headers=headers),
+                    stream=True,
+                )
+            )
         except httpx.HTTPError as e:
             logger.warning("anthropic upstream streaming request failed: %s", e)
             return JSONResponse(
