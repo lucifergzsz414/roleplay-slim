@@ -28,14 +28,29 @@ import tkinter as tk
 import urllib.error
 import urllib.request
 from pathlib import Path
-from tkinter import filedialog, messagebox
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
+from urllib.parse import urlsplit
 
-import theme
 from theme import (
-    ACCENT, ACCENT_DARK, ACCENT_STRONG, BG, BORDER, CARD, DANGER, SUCCESS, TEXT,
-    TEXT_DIM, TEXT_FAINT, WARN, Card, PillButton, SavingsBar, apply_ttk_theme,
-    font, mono,
+    ACCENT,
+    ACCENT_DARK,
+    ACCENT_STRONG,
+    BANNER,
+    BG,
+    BORDER,
+    CARD,
+    DANGER,
+    SUCCESS,
+    TEXT,
+    TEXT_DIM,
+    TEXT_FAINT,
+    WARN,
+    Card,
+    PillButton,
+    SavingsBar,
+    apply_ttk_theme,
+    font,
+    mono,
 )
 
 
@@ -115,6 +130,32 @@ def _find_proxy_exe() -> Path | None:
 
 def _fmt(n: int) -> str:
     return f"{n:,}"
+
+
+def _validate_upstream_url(value: str) -> str:
+    """Return a safe normalized HTTP(S) base URL for the generated TOML."""
+    value = value.strip().rstrip("/")
+    try:
+        parts = urlsplit(value)
+        hostname = parts.hostname
+        parts.port  # force validation of malformed and out-of-range ports
+    except ValueError as e:
+        raise ValueError("请输入有效的 http/https 地址和端口。") from e
+    if (
+        parts.scheme not in {"http", "https"}
+        or not parts.netloc
+        or not hostname
+        or not hostname.strip(".")
+        or parts.username is not None
+        or parts.password is not None
+        or parts.query
+        or parts.fragment
+        or "\\" in value
+        or '"' in value
+        or any(ch.isspace() for ch in value)
+    ):
+        raise ValueError("请输入不含账号、查询参数或换行的 http/https 地址。")
+    return value
 
 
 class LauncherApp:
@@ -204,30 +245,40 @@ class LauncherApp:
     # ---------------------------------------------------------------- UI ---
     def _build_ui(self) -> None:
         self._build_header()
-        self._build_step1()
-        self._build_step2()
+        setup = tk.Frame(self.root, bg=BG)
+        setup.pack(fill=tk.X, padx=20, pady=(0, 10))
+        setup.grid_columnconfigure(0, weight=1, uniform="setup")
+        setup.grid_columnconfigure(1, weight=1, uniform="setup")
+        self._build_step1(setup)
+        self._build_step2(setup)
         self._build_step3()
         self._build_log()
         self._on_platform_change()
 
     def _build_header(self) -> None:
-        head = tk.Frame(self.root, bg=BG)
-        head.pack(fill=tk.X, padx=20, pady=(18, 14))
+        head = tk.Frame(self.root, bg=BANNER)
+        head.pack(fill=tk.X, padx=20, pady=(18, 14), ipady=12)
 
         if self._icon_img is not None:
-            tk.Label(head, image=self._icon_img, bg=BG).pack(side=tk.LEFT, padx=(0, 12))
+            tk.Label(head, image=self._icon_img, bg=BANNER).pack(side=tk.LEFT, padx=(14, 12))
 
-        titles = tk.Frame(head, bg=BG)
+        titles = tk.Frame(head, bg=BANNER)
         titles.pack(side=tk.LEFT, anchor=tk.W)
         tk.Label(
             titles, text="聊得越久，角色越不像她？",
-            bg=BG, fg=TEXT, font=font(15, bold=True),
+            bg=BANNER, fg=TEXT, font=font(15, bold=True),
         ).pack(anchor=tk.W)
         tk.Label(
             titles,
             text="保护人设和最近的对话，只整理越来越长的旧聊天记录。",
-            bg=BG, fg=TEXT_DIM, font=font(9),
+            bg=BANNER, fg=TEXT_DIM, font=font(9),
         ).pack(anchor=tk.W, pady=(3, 0))
+
+        badge = tk.Label(
+            head, text="本地运行  ·  Key 不落盘", bg=BORDER, fg=SUCCESS,
+            font=font(8, bold=True), padx=12, pady=6,
+        )
+        badge.pack(side=tk.RIGHT, padx=(10, 14))
 
     def _step_title(self, parent: tk.Frame, num: str, text: str) -> None:
         row = tk.Frame(parent, bg=CARD)
@@ -238,9 +289,9 @@ class LauncherApp:
         ).pack(side=tk.LEFT, padx=(0, 8))
         tk.Label(row, text=text, bg=CARD, fg=TEXT, font=font(10, bold=True)).pack(side=tk.LEFT)
 
-    def _build_step1(self) -> None:
-        card = Card(self.root, padding=14)
-        card.pack(fill=tk.X, padx=20, pady=(0, 10))
+    def _build_step1(self, parent: tk.Frame) -> None:
+        card = Card(parent, padding=14)
+        card.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         b = card.body
         self._step_title(b, "1", "你的 AI 服务商")
 
@@ -253,7 +304,7 @@ class LauncherApp:
             values=list(UPSTREAM_PRESETS.keys()), width=18, style="RS.TCombobox",
             font=font(9),
         )
-        combo.pack(side=tk.LEFT)
+        combo.pack(fill=tk.X)
         combo.bind("<<ComboboxSelected>>", self._on_upstream_change)
 
         self.upstream_url = tk.StringVar(value=UPSTREAM_PRESETS["DeepSeek"])
@@ -262,16 +313,16 @@ class LauncherApp:
             bg=BG, fg=TEXT_DIM, readonlybackground=BG, relief=tk.FLAT,
             insertbackground=TEXT, disabledbackground=BG, disabledforeground=TEXT_FAINT,
         )
-        self.upstream_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0), ipady=5)
+        self.upstream_entry.pack(fill=tk.X, pady=(8, 0), ipady=5)
 
         tk.Label(
-            b, text="✓  不需要填 API Key —— 你的 key 还是填在聊天软件里，这里看不到",
+            b, text="✓  无需在这里填写 API Key",
             bg=CARD, fg=SUCCESS, font=font(8),
         ).pack(anchor=tk.W, pady=(9, 0))
 
-    def _build_step2(self) -> None:
-        card = Card(self.root, padding=14)
-        card.pack(fill=tk.X, padx=20, pady=(0, 10))
+    def _build_step2(self, parent: tk.Frame) -> None:
+        card = Card(parent, padding=14)
+        card.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         b = card.body
         self._step_title(b, "2", "你用什么聊天")
 
@@ -290,7 +341,7 @@ class LauncherApp:
         self.url_value = tk.StringVar(value=f"http://127.0.0.1:{self.port}/v1")
         self.url_display = tk.Entry(
             row, textvariable=self.url_value, state="readonly",
-            font=mono(12, bold=True), justify=tk.CENTER,
+            font=mono(10, bold=True), justify=tk.CENTER,
             bg=BG, fg=ACCENT, readonlybackground=BG, relief=tk.FLAT,
             insertbackground=TEXT,
         )
@@ -301,7 +352,7 @@ class LauncherApp:
         )
         self.copy_btn.pack(side=tk.RIGHT, padx=(10, 0))
         tk.Label(
-            self.url_frame, text="把这个地址填进软件的「API 地址」栏，然后重启那个软件。",
+            self.url_frame, text="复制到聊天软件的「API 地址」栏",
             bg=CARD, fg=TEXT_DIM, font=font(8),
         ).pack(anchor=tk.W, pady=(8, 0))
 
@@ -318,7 +369,7 @@ class LauncherApp:
         ).pack(side=tk.LEFT, padx=(10, 0))
 
     def _build_step3(self) -> None:
-        card = Card(self.root, padding=14)
+        card = Card(self.root, padding=16)
         card.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
         b = card.body
         self._step_title(b, "3", "开着它，然后像平常一样聊天")
@@ -345,12 +396,12 @@ class LauncherApp:
 
         # —— 主角：省了多少 ——
         hero = tk.Frame(b, bg=CARD)
-        hero.pack(fill=tk.X, pady=(20, 0))
+        hero.pack(fill=tk.X, pady=(14, 0))
 
         self.big_var = tk.StringVar(value="—")
         self.big_label = tk.Label(
             hero, textvariable=self.big_var, bg=CARD, fg=TEXT_FAINT,
-            font=mono(22, bold=True),
+            font=mono(24, bold=True),
         )
         self.big_label.pack()
 
@@ -360,7 +411,7 @@ class LauncherApp:
         ).pack(pady=(6, 0))
 
         self.bar = SavingsBar(hero, width=560, height=58, bg=CARD)
-        self.bar.pack(pady=(16, 0))
+        self.bar.pack(pady=(14, 0))
 
         self.total_var = tk.StringVar(value="")
         tk.Label(
@@ -368,15 +419,30 @@ class LauncherApp:
         ).pack(pady=(14, 0))
 
     def _build_log(self) -> None:
-        wrap = tk.Frame(self.root, bg=BG)
-        wrap.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 16))
+        card = Card(self.root, padding=10)
+        card.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 16))
+        wrap = card.body
+
+        title_row = tk.Frame(wrap, bg=CARD)
+        title_row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(
+            title_row, text="运行记录", bg=CARD, fg=TEXT_DIM,
+            font=font(8, bold=True),
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            title_row, text="只显示本次启动的信息", bg=CARD, fg=TEXT_FAINT,
+            font=font(8),
+        ).pack(side=tk.RIGHT)
+
+        log_body = tk.Frame(wrap, bg=CARD)
+        log_body.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(
-            wrap, height=4, wrap=tk.WORD, font=mono(8), state=tk.DISABLED,
-            bg=BG, fg=TEXT_DIM, relief=tk.FLAT, borderwidth=0,
+            log_body, height=3, wrap=tk.WORD, font=mono(8), state=tk.DISABLED,
+            bg=CARD, fg=TEXT_DIM, relief=tk.FLAT, borderwidth=0,
             insertbackground=TEXT, highlightthickness=0,
         )
-        scroll = ttk.Scrollbar(wrap, command=self.log_text.yview,
+        scroll = ttk.Scrollbar(log_body, command=self.log_text.yview,
                                style="RS.Vertical.TScrollbar")
         self.log_text.configure(yscrollcommand=scroll.set)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -424,9 +490,10 @@ class LauncherApp:
             self._stop_proxy()
 
     def _start_proxy(self) -> None:
-        upstream = self.upstream_url.get().strip()
-        if not upstream:
-            messagebox.showwarning("还差一步", "请先选择或填写你的 AI 服务商地址。")
+        try:
+            upstream = _validate_upstream_url(self.upstream_url.get())
+        except ValueError as e:
+            messagebox.showwarning("地址不正确", str(e))
             return
 
         work = _work_dir()
@@ -643,7 +710,8 @@ class LauncherApp:
             else:
                 return
         except Exception as e:
-            self.root.after(0, lambda: self._patch_done(f"改配置失败：{e}", ok=False))
+            error_message = f"改配置失败：{e}"
+            self.root.after(0, lambda: self._patch_done(error_message, ok=False))
             return
         self.root.after(
             0, lambda: self._patch_done(f"{platform} 配置已改好，重启它就能生效", ok=True)

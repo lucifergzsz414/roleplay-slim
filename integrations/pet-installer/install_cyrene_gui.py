@@ -218,9 +218,10 @@ class InstallerApp:
             log(f"  model-settings.json 位置: {settings_path}", tag="ok")
         except FileNotFoundError as e:
             log(f"  {e}", tag="error")
+            error_message = str(e)
             self.root.after(0, lambda: messagebox.showerror(
                 "找不到用户数据目录",
-                f"{e}\n\n请先把 Cyrene 完整启动运行一次（走完首次引导）再安装。",
+                f"{error_message}\n\n请先把 Cyrene 完整启动运行一次（走完首次引导）再安装。",
             ))
             return
 

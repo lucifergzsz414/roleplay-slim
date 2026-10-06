@@ -21,6 +21,7 @@ from tkinter import ttk
 # ---------------------------------------------------------------------------
 BG = "#12141A"
 CARD = "#1A1D26"
+BANNER = "#161923"
 BORDER = "#262A36"
 BORDER_SOFT = "#1F2330"
 
@@ -93,7 +94,8 @@ class PillButton(tk.Canvas):
     ):
         super().__init__(
             master, width=width, height=height, bg=bg,
-            highlightthickness=0, bd=0, cursor="hand2",
+            highlightthickness=2, highlightbackground=bg,
+            highlightcolor=ACCENT, bd=0, cursor="hand2", takefocus=True,
         )
         self._command = command
         self._fill = fill
@@ -113,6 +115,10 @@ class PillButton(tk.Canvas):
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
         self.bind("<Button-1>", self._on_click)
+        self.bind("<KeyRelease-Return>", self._on_click)
+        self.bind("<KeyRelease-space>", self._on_click)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
 
     # -- state ------------------------------------------------------------
     def configure_text(self, text: str) -> None:
@@ -138,9 +144,17 @@ class PillButton(tk.Canvas):
         if self._enabled:
             self.itemconfigure(self._shape, fill=self._fill)
 
-    def _on_click(self, _e=None) -> None:
+    def _on_click(self, _e=None) -> str:
         if self._enabled and self._command:
             self._command()
+        return "break"
+
+    def _on_focus_in(self, _e=None) -> None:
+        if self._enabled:
+            self.configure(highlightbackground=ACCENT, highlightcolor=ACCENT)
+
+    def _on_focus_out(self, _e=None) -> None:
+        self.configure(highlightbackground=self.cget("bg"))
 
 
 class SavingsBar(tk.Canvas):
