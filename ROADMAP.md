@@ -39,6 +39,13 @@ larger feature proposal should start (a short design doc in
 
 ## Ongoing, not versioned
 
+- **Launchers for non-technical users** (`integrations/launcher/` for
+  Windows, `integrations/termux/` for Android). These are not part of the
+  published library — they're the "pick this up and use it without reading
+  anything" front door the project otherwise lacks. Since the underlying
+  proxy needs no API key of its own, both are thin: start it, show the
+  URL to paste into whatever app is talking to it, show the savings.
+
 - **More framework adapters in `examples/`.** SillyTavern, a QQ bot,
   Telegram, and a generic OpenWebUI-style adapter exist. A native
   Discord.py `Cog`-based version and a proper async/production-grade

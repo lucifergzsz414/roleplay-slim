@@ -92,6 +92,11 @@ LAUNCHER_HIDDEN_IMPORTS = ["install", "patch_bandori", "patch_cyrene"]
 LAUNCHER_EXE_NAME = "roleplay-slim启动器.exe"
 LAUNCHER_ZIP_NAME = "roleplay-slim启动器.zip"
 LAUNCHER_README_SRC = ROOT / "使用说明_启动器.txt"
+LAUNCHER_ASSETS = ROOT.parent / "launcher" / "assets"
+LAUNCHER_ICON = LAUNCHER_ASSETS / "app.ico"
+# The header PNG is read at runtime with tk.PhotoImage, so it has to be
+# bundled — a frozen exe can only see what shipped inside it.
+LAUNCHER_EXTRA_DATA = [(LAUNCHER_ASSETS / "app_header.png", "assets")]
 
 
 def pyinstaller_available() -> bool:
@@ -123,10 +128,17 @@ def run(cmd: list[str], **kwargs) -> None:
 def _build_tk_exe(
     source: Path, name: str, exe_name: str, workdir_suffix: str,
     deps: list[Path], hidden_import: str | list[str],
+    icon: Path | None = None,
+    extra_data: list[tuple[Path, str]] | None = None,
 ) -> Path:
     """Shared PyInstaller invocation for the tkinter GUIs (installer,
     uninstaller, and their BandoriPet counterparts) — all of them bundle a
-    single patch-logic module the same way."""
+    single patch-logic module the same way.
+
+    `icon` sets the .exe's own icon (what Explorer and the taskbar show).
+    `extra_data` bundles further files as (source, destination-subdir) —
+    the launcher needs its in-window PNG this way, since a frozen app can't
+    read anything that wasn't shipped inside it."""
     step(f"Building {exe_name}")
     DIST.mkdir(exist_ok=True)
 
@@ -166,6 +178,12 @@ def _build_tk_exe(
     # one-element list.
     for _hidden in ([hidden_import] if isinstance(hidden_import, str) else hidden_import):
         cmd.extend(["--hidden-import", _hidden])
+
+    if icon is not None and icon.is_file():
+        cmd.extend(["--icon", str(icon)])
+    for src, dest_dir in (extra_data or []):
+        if src.is_file():
+            cmd.extend(["--add-data", f"{src}{os.pathsep}{dest_dir}"])
 
     cmd.append(str(source))
 
@@ -235,6 +253,7 @@ def build_launcher() -> Path:
     return _build_tk_exe(
         LAUNCHER_SRC, "roleplay-slim启动器", LAUNCHER_EXE_NAME,
         "launcher", LAUNCHER_DEPS, LAUNCHER_HIDDEN_IMPORTS,
+        icon=LAUNCHER_ICON, extra_data=LAUNCHER_EXTRA_DATA,
     )
 
 

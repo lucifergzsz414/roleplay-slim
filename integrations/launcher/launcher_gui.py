@@ -12,6 +12,9 @@
 _build_upstream_headers：调用方带了真 token 就用调用方的），所以用户的 key
 还是填在酒馆/桌宠里，启动器从头到尾看不到、也不存。对一个公开分发的小工具
 来说，这一点比省事更重要。
+
+界面上的取舍：那个"省了多少"的条形图是整屏的主角。百分比数字是记不住的，
+一条肉眼可见变短的条子才是。颜色和控件样式统一来自 theme.py，跟 app.ico 同源。
 """
 
 from __future__ import annotations
@@ -25,7 +28,16 @@ import tkinter as tk
 import urllib.error
 import urllib.request
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
+from tkinter import ttk
+
+import theme
+from theme import (
+    ACCENT, ACCENT_DARK, ACCENT_STRONG, BG, BORDER, CARD, DANGER, SUCCESS, TEXT,
+    TEXT_DIM, TEXT_FAINT, WARN, Card, PillButton, SavingsBar, apply_ttk_theme,
+    font, mono,
+)
+
 
 # ---------------------------------------------------------------------------
 # 路径解析：冻结成 exe 之后，资源在 _MEIPASS，工作目录在 exe 旁边
@@ -52,9 +64,6 @@ for _sub in ("installer", "installer_bandori", "installer_cyrene"):
 _PROXY_EXE_NAME = "roleplay-slim-proxy.exe"
 DEFAULT_PORT = 8795  # 8791=若叶睦 8792=邦多利 8793=Cyrene，这里另起一个避免打架
 
-# ---------------------------------------------------------------------------
-# 上游预设：只是 base URL，不含任何密钥
-# ---------------------------------------------------------------------------
 UPSTREAM_PRESETS: dict[str, str] = {
     "DeepSeek": "https://api.deepseek.com/v1",
     "OpenAI": "https://api.openai.com/v1",
@@ -111,152 +120,300 @@ def _fmt(n: int) -> str:
 class LauncherApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("roleplay-slim 启动器")
-        self.root.geometry("680x600")
-        self.root.minsize(620, 560)
+        self.root.title("聊天记录整理器 · roleplay-slim")
+        self.root.configure(bg=BG)
+
+        self.style = apply_ttk_theme(self.root)
 
         self.proc: subprocess.Popen | None = None
         self.port = DEFAULT_PORT
         self._log_queue: list[tuple[str, str]] = []
         self._after_id: str | None = None
         self._stats_after_id: str | None = None
+        self._last_before = 0
+        self._misses = 0
+        self._icon_img: tk.PhotoImage | None = None
 
+        self._set_window_icon()
         self._build_ui()
         self._center()
-        self._initial_log()
+        self._enable_dark_titlebar()
+        self._log("准备好了，选好上面的两项就可以点「启动」。", "info")
+        # Keep watching the port for the window's whole life, not only after
+        # we started the proxy ourselves. Otherwise a GUI restarted while a
+        # proxy is still running shows "未启动" while the port is in fact
+        # occupied — and the next click on 启动 collides with it.
+        self._schedule_stats()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    # ---------------------------------------------------------------- 杂 ---
+    def _set_window_icon(self) -> None:
+        """.ico works for the taskbar; the in-window header uses the PNG
+        because Tk's PhotoImage can't scale and can't read .ico."""
+        for name in ("app.ico", "assets/app.ico"):
+            p = _bundle_dir / name
+            if p.is_file():
+                try:
+                    self.root.iconbitmap(default=str(p))
+                    break
+                except tk.TclError:
+                    pass
+        for name in ("app_header.png", "assets/app_header.png"):
+            p = _bundle_dir / name
+            if p.is_file():
+                try:
+                    self._icon_img = tk.PhotoImage(file=str(p))
+                    break
+                except tk.TclError:
+                    pass
+
     def _center(self) -> None:
+        """Size the window to what the content actually needs, then centre it.
+
+        Hard-coding a geometry meant step 3 got silently clipped off the
+        bottom the moment the content grew — and the required height also
+        varies with the user's DPI scaling, so a fixed number was wrong on
+        some machines and right on others."""
         self.root.update_idletasks()
+        w = max(self.root.winfo_reqwidth(), 700)
+        h = self.root.winfo_reqheight()
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        w, h = self.root.winfo_width(), self.root.winfo_height()
-        self.root.geometry(f"+{(sw - w) // 2}+{(sh - h) // 3}")
+        h = min(h, int(sh * 0.92))  # never taller than the screen
+        self.root.minsize(min(660, w), min(620, h))
+        self.root.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 3)}")
+
+    def _enable_dark_titlebar(self) -> None:
+        """Windows 10 1809+ draws a light title bar by default, which looks
+        broken on top of a dark window. This is a one-call DWM flag; it's
+        best-effort on purpose — older Windows just keeps the light bar."""
+        try:
+            import ctypes
+
+            self.root.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+            value = ctypes.c_int(1)
+            for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE, older builds
+                res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
+                )
+                if res == 0:
+                    break
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------- UI ---
     def _build_ui(self) -> None:
-        ttk.Label(
-            self.root, text="聊得越久，角色越不像她？",
-            font=("Microsoft YaHei UI", 14, "bold"),
-        ).pack(pady=(14, 2))
-        ttk.Label(
-            self.root,
-            text="这个小工具会保护人设和最近的对话，只整理越来越长的旧聊天记录。",
-            font=("Microsoft YaHei UI", 9),
-        ).pack(pady=(0, 12))
+        self._build_header()
+        self._build_step1()
+        self._build_step2()
+        self._build_step3()
+        self._build_log()
+        self._on_platform_change()
 
-        # —— 第一步：上游 ——
-        step1 = ttk.LabelFrame(self.root, text="第 1 步 · 你的 AI 服务商", padding=10)
-        step1.pack(fill=tk.X, padx=16, pady=(0, 8))
+    def _build_header(self) -> None:
+        head = tk.Frame(self.root, bg=BG)
+        head.pack(fill=tk.X, padx=20, pady=(18, 14))
 
-        row1 = ttk.Frame(step1)
-        row1.pack(fill=tk.X)
+        if self._icon_img is not None:
+            tk.Label(head, image=self._icon_img, bg=BG).pack(side=tk.LEFT, padx=(0, 12))
+
+        titles = tk.Frame(head, bg=BG)
+        titles.pack(side=tk.LEFT, anchor=tk.W)
+        tk.Label(
+            titles, text="聊得越久，角色越不像她？",
+            bg=BG, fg=TEXT, font=font(15, bold=True),
+        ).pack(anchor=tk.W)
+        tk.Label(
+            titles,
+            text="保护人设和最近的对话，只整理越来越长的旧聊天记录。",
+            bg=BG, fg=TEXT_DIM, font=font(9),
+        ).pack(anchor=tk.W, pady=(3, 0))
+
+    def _step_title(self, parent: tk.Frame, num: str, text: str) -> None:
+        row = tk.Frame(parent, bg=CARD)
+        row.pack(anchor=tk.W, fill=tk.X)
+        tk.Label(
+            row, text=num, bg=ACCENT_STRONG, fg="#FFFFFF",
+            font=font(8, bold=True), width=2, height=1,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(row, text=text, bg=CARD, fg=TEXT, font=font(10, bold=True)).pack(side=tk.LEFT)
+
+    def _build_step1(self) -> None:
+        card = Card(self.root, padding=14)
+        card.pack(fill=tk.X, padx=20, pady=(0, 10))
+        b = card.body
+        self._step_title(b, "1", "你的 AI 服务商")
+
+        row = tk.Frame(b, bg=CARD)
+        row.pack(fill=tk.X, pady=(10, 0))
+
         self.upstream_name = tk.StringVar(value="DeepSeek")
         combo = ttk.Combobox(
-            row1, textvariable=self.upstream_name, state="readonly",
-            values=list(UPSTREAM_PRESETS.keys()), width=22,
+            row, textvariable=self.upstream_name, state="readonly",
+            values=list(UPSTREAM_PRESETS.keys()), width=18, style="RS.TCombobox",
+            font=font(9),
         )
         combo.pack(side=tk.LEFT)
         combo.bind("<<ComboboxSelected>>", self._on_upstream_change)
 
         self.upstream_url = tk.StringVar(value=UPSTREAM_PRESETS["DeepSeek"])
-        self.upstream_entry = ttk.Entry(
-            row1, textvariable=self.upstream_url, font=("Consolas", 9), state="readonly",
+        self.upstream_entry = tk.Entry(
+            row, textvariable=self.upstream_url, font=mono(9), state="readonly",
+            bg=BG, fg=TEXT_DIM, readonlybackground=BG, relief=tk.FLAT,
+            insertbackground=TEXT, disabledbackground=BG, disabledforeground=TEXT_FAINT,
         )
-        self.upstream_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+        self.upstream_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0), ipady=5)
 
-        ttk.Label(
-            step1, text="不需要填 API Key —— 你的 key 还是填在聊天软件里，这个工具看不到。",
-            font=("Microsoft YaHei UI", 8), foreground="#2e7d32",
-        ).pack(anchor=tk.W, pady=(6, 0))
+        tk.Label(
+            b, text="✓  不需要填 API Key —— 你的 key 还是填在聊天软件里，这里看不到",
+            bg=CARD, fg=SUCCESS, font=font(8),
+        ).pack(anchor=tk.W, pady=(9, 0))
 
-        # —— 第二步：平台 ——
-        step2 = ttk.LabelFrame(self.root, text="第 2 步 · 你用什么聊天", padding=10)
-        step2.pack(fill=tk.X, padx=16, pady=(0, 8))
+    def _build_step2(self) -> None:
+        card = Card(self.root, padding=14)
+        card.pack(fill=tk.X, padx=20, pady=(0, 10))
+        b = card.body
+        self._step_title(b, "2", "你用什么聊天")
 
         self.platform = tk.StringVar(value=PLATFORM_UNIVERSAL)
-        pcombo = ttk.Combobox(
-            step2, textvariable=self.platform, state="readonly", values=PLATFORMS,
+        combo = ttk.Combobox(
+            b, textvariable=self.platform, state="readonly", values=PLATFORMS,
+            style="RS.TCombobox", font=font(9),
         )
-        pcombo.pack(fill=tk.X)
-        pcombo.bind("<<ComboboxSelected>>", self._on_platform_change)
+        combo.pack(fill=tk.X, pady=(10, 0))
+        combo.bind("<<ComboboxSelected>>", self._on_platform_change)
 
-        self.url_frame = ttk.Frame(step2)
-        self.url_frame.pack(fill=tk.X, pady=(8, 0))
-        ttk.Label(self.url_frame, text="把这个地址填进软件的「API 地址」：",
-                  font=("Microsoft YaHei UI", 9)).pack(anchor=tk.W)
-        urlrow = ttk.Frame(self.url_frame)
-        urlrow.pack(fill=tk.X, pady=(4, 0))
+        # —— 通用模式：一个大字地址 + 复制 ——
+        self.url_frame = tk.Frame(b, bg=CARD)
+        row = tk.Frame(self.url_frame, bg=CARD)
+        row.pack(fill=tk.X)
         self.url_value = tk.StringVar(value=f"http://127.0.0.1:{self.port}/v1")
-        url_display = ttk.Entry(
-            urlrow, textvariable=self.url_value, state="readonly",
-            font=("Consolas", 11), justify=tk.CENTER,
+        self.url_display = tk.Entry(
+            row, textvariable=self.url_value, state="readonly",
+            font=mono(12, bold=True), justify=tk.CENTER,
+            bg=BG, fg=ACCENT, readonlybackground=BG, relief=tk.FLAT,
+            insertbackground=TEXT,
         )
-        url_display.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(urlrow, text="复制", width=8, command=self._copy_url).pack(
-            side=tk.RIGHT, padx=(8, 0))
+        self.url_display.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8)
+        self.copy_btn = PillButton(
+            row, "复制", command=self._copy_url, width=74, height=36,
+            fill=BORDER, hover=ACCENT_DARK, font_=font(9, bold=True),
+        )
+        self.copy_btn.pack(side=tk.RIGHT, padx=(10, 0))
+        tk.Label(
+            self.url_frame, text="把这个地址填进软件的「API 地址」栏，然后重启那个软件。",
+            bg=CARD, fg=TEXT_DIM, font=font(8),
+        ).pack(anchor=tk.W, pady=(8, 0))
 
-        self.patch_frame = ttk.Frame(step2)
-        self.patch_btn = ttk.Button(
-            self.patch_frame, text="一键改好它的配置", command=self._one_click_patch)
+        # —— 已适配应用：一键改配置 ——
+        self.patch_frame = tk.Frame(b, bg=CARD)
+        self.patch_btn = PillButton(
+            self.patch_frame, "一键改好它的配置", command=self._one_click_patch,
+            width=170, height=36, font_=font(9, bold=True),
+        )
         self.patch_btn.pack(side=tk.LEFT)
-        ttk.Label(
-            self.patch_frame, text="（会先备份原配置，可随时还原）",
-            font=("Microsoft YaHei UI", 8),
-        ).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Label(
+            self.patch_frame, text="会先备份原配置，可随时还原",
+            bg=CARD, fg=TEXT_FAINT, font=font(8),
+        ).pack(side=tk.LEFT, padx=(10, 0))
 
-        # —— 第三步：开关 + 实时数字 ——
-        step3 = ttk.LabelFrame(self.root, text="第 3 步 · 开着它，然后正常聊天", padding=10)
-        step3.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
+    def _build_step3(self) -> None:
+        card = Card(self.root, padding=14)
+        card.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+        b = card.body
+        self._step_title(b, "3", "开着它，然后像平常一样聊天")
 
-        btnrow = ttk.Frame(step3)
-        btnrow.pack(fill=tk.X)
-        self.toggle_btn = ttk.Button(btnrow, text="▶  启动", width=14, command=self._toggle)
+        row = tk.Frame(b, bg=CARD)
+        row.pack(fill=tk.X, pady=(12, 0))
+
+        self.toggle_btn = PillButton(
+            row, "▶  启动", command=self._toggle, width=132, height=40,
+        )
         self.toggle_btn.pack(side=tk.LEFT)
+
+        status_box = tk.Frame(row, bg=CARD)
+        status_box.pack(side=tk.LEFT, padx=(14, 0))
+        self.dot = tk.Canvas(status_box, width=10, height=10, bg=CARD,
+                             highlightthickness=0, bd=0)
+        self.dot_id = self.dot.create_oval(1, 1, 9, 9, fill=TEXT_FAINT, outline="")
+        self.dot.pack(side=tk.LEFT, pady=(2, 0))
         self.status_var = tk.StringVar(value="未启动")
-        ttk.Label(btnrow, textvariable=self.status_var,
-                  font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT, padx=(12, 0))
+        tk.Label(
+            status_box, textvariable=self.status_var, bg=CARD, fg=TEXT_DIM,
+            font=font(9),
+        ).pack(side=tk.LEFT, padx=(7, 0))
+
+        # —— 主角：省了多少 ——
+        hero = tk.Frame(b, bg=CARD)
+        hero.pack(fill=tk.X, pady=(20, 0))
 
         self.big_var = tk.StringVar(value="—")
-        ttk.Label(step3, textvariable=self.big_var,
-                  font=("Consolas", 17, "bold"), foreground="#1565c0").pack(pady=(14, 2))
-        self.big_sub = tk.StringVar(value="启动后，这里会显示每次对话省下多少")
-        ttk.Label(step3, textvariable=self.big_sub,
-                  font=("Microsoft YaHei UI", 9)).pack()
+        self.big_label = tk.Label(
+            hero, textvariable=self.big_var, bg=CARD, fg=TEXT_FAINT,
+            font=mono(22, bold=True),
+        )
+        self.big_label.pack()
+
+        self.big_sub = tk.StringVar(value="启动后，这里会显示每次对话少发了多少内容")
+        tk.Label(
+            hero, textvariable=self.big_sub, bg=CARD, fg=TEXT_DIM, font=font(9),
+        ).pack(pady=(6, 0))
+
+        self.bar = SavingsBar(hero, width=560, height=58, bg=CARD)
+        self.bar.pack(pady=(16, 0))
 
         self.total_var = tk.StringVar(value="")
-        ttk.Label(step3, textvariable=self.total_var,
-                  font=("Microsoft YaHei UI", 9), foreground="#555").pack(pady=(10, 0))
+        tk.Label(
+            b, textvariable=self.total_var, bg=CARD, fg=TEXT_FAINT, font=font(8),
+        ).pack(pady=(14, 0))
+
+    def _build_log(self) -> None:
+        wrap = tk.Frame(self.root, bg=BG)
+        wrap.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 16))
 
         self.log_text = tk.Text(
-            step3, height=6, wrap=tk.WORD, font=("Consolas", 8), state=tk.DISABLED,
-            background="#1e1e1e", foreground="#d4d4d4", relief=tk.FLAT, borderwidth=0,
+            wrap, height=4, wrap=tk.WORD, font=mono(8), state=tk.DISABLED,
+            bg=BG, fg=TEXT_DIM, relief=tk.FLAT, borderwidth=0,
+            insertbackground=TEXT, highlightthickness=0,
         )
-        self.log_text.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
-        self.log_text.tag_configure("ok", foreground="#6a9955")
-        self.log_text.tag_configure("warn", foreground="#ce9178")
-        self.log_text.tag_configure("error", foreground="#f44747")
+        scroll = ttk.Scrollbar(wrap, command=self.log_text.yview,
+                               style="RS.Vertical.TScrollbar")
+        self.log_text.configure(yscrollcommand=scroll.set)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self._on_platform_change()
+        self.log_text.tag_configure("ok", foreground=SUCCESS)
+        self.log_text.tag_configure("warn", foreground=WARN)
+        self.log_text.tag_configure("error", foreground=DANGER)
+        self.log_text.tag_configure("info", foreground=TEXT_FAINT)
 
     # ------------------------------------------------------------- 事件 ---
     def _on_upstream_change(self, _evt=None) -> None:
         name = self.upstream_name.get()
         if name == "自定义…":
-            self.upstream_entry.configure(state=tk.NORMAL)
+            self.upstream_entry.configure(
+                state=tk.NORMAL, fg=TEXT, bg=BG, readonlybackground=BG,
+            )
             self.upstream_url.set("")
         else:
-            self.upstream_entry.configure(state="readonly")
+            self.upstream_entry.configure(
+                state="readonly", fg=TEXT_DIM, readonlybackground=BG,
+            )
             self.upstream_url.set(UPSTREAM_PRESETS[name])
 
     def _on_platform_change(self, _evt=None) -> None:
         if self.platform.get() == PLATFORM_UNIVERSAL:
             self.patch_frame.pack_forget()
+            self.url_frame.pack(fill=tk.X, pady=(12, 0))
         else:
-            self.patch_frame.pack(fill=tk.X, pady=(8, 0))
+            self.url_frame.pack_forget()
+            self.patch_frame.pack(fill=tk.X, pady=(12, 0))
 
     def _copy_url(self) -> None:
         self.root.clipboard_clear()
         self.root.clipboard_append(self.url_value.get())
+        self.copy_btn.configure_text("已复制 ✓")
+        self.root.after(1400, lambda: self.copy_btn.configure_text("复制"))
         self._log("地址已复制到剪贴板", "ok")
 
     # ------------------------------------------------------------- 代理 ---
@@ -302,7 +459,8 @@ class LauncherApp:
             return
 
         self.status_var.set("正在启动…")
-        self.toggle_btn.configure(state=tk.DISABLED)
+        self._set_dot(WARN)
+        self.toggle_btn.set_enabled(False)
         threading.Thread(target=self._wait_ready, daemon=True).start()
 
     def _wait_ready(self) -> None:
@@ -322,21 +480,29 @@ class LauncherApp:
 
     def _on_started(self) -> None:
         self.status_var.set(f"运行中 · 127.0.0.1:{self.port}")
-        self.toggle_btn.configure(state=tk.NORMAL, text="■  停止")
+        self._set_dot(SUCCESS)
+        self.toggle_btn.configure_text("■  停止")
+        self.toggle_btn.configure_fill(BORDER, ACCENT_DARK)
+        self.toggle_btn.set_enabled(True)
         self._log("代理已启动，现在可以正常聊天了", "ok")
-        self.big_sub.set("正常聊天就行，下面的数字会自己动")
-        self._schedule_stats()
+        self.big_sub.set("正常聊天就行，数字会自己动")
 
     def _on_start_failed(self, why: str) -> None:
         self.status_var.set("未启动")
-        self.toggle_btn.configure(state=tk.NORMAL, text="▶  启动")
+        self._set_dot(TEXT_FAINT)
+        self.toggle_btn.configure_text("▶  启动")
+        self.toggle_btn.configure_fill(ACCENT_STRONG, ACCENT)
+        self.toggle_btn.set_enabled(True)
         self._log(f"启动失败：{why}", "error")
         self._stop_proxy(quiet=True)
 
+    def _set_dot(self, color: str) -> None:
+        self.dot.itemconfigure(self.dot_id, fill=color)
+
     def _stop_proxy(self, quiet: bool = False) -> None:
-        if self._stats_after_id is not None:
-            self.root.after_cancel(self._stats_after_id)
-            self._stats_after_id = None
+        # Polling deliberately keeps running after a stop — the port might
+        # still be served by an instance this window didn't start, and the
+        # window should keep telling the truth about that.
         if self.proc is not None:
             try:
                 self.proc.terminate()
@@ -348,7 +514,10 @@ class LauncherApp:
                     pass
             self.proc = None
         self.status_var.set("未启动")
-        self.toggle_btn.configure(text="▶  启动", state=tk.NORMAL)
+        self._set_dot(TEXT_FAINT)
+        self.toggle_btn.configure_text("▶  启动")
+        self.toggle_btn.configure_fill(ACCENT_STRONG, ACCENT)
+        self.toggle_btn.set_enabled(True)
         if not quiet:
             self._log("已停止", "warn")
 
@@ -367,21 +536,67 @@ class LauncherApp:
             ) as r:
                 data = json.loads(r.read().decode("utf-8"))
         except Exception:
+            self.root.after(0, self._mark_unreachable)
             return
+        self.root.after(0, self._mark_reachable)
         self.root.after(0, self._render_stats, data)
+
+    def _mark_reachable(self) -> None:
+        """Something is serving our port. If it isn't the process this
+        window started, say so and disable 启动 — clicking it would just
+        spawn a second proxy that immediately fails to bind."""
+        self._misses = 0
+        if self.proc is not None:
+            return
+        if self.status_var.get() != "未启动":
+            return  # a start is already in flight; _wait_ready owns the text
+        self.status_var.set(f"运行中 · 127.0.0.1:{self.port}（由别的窗口启动）")
+        self._set_dot(SUCCESS)
+        self.toggle_btn.configure_text("已在运行")
+        self.toggle_btn.set_enabled(False)
+
+    def _mark_unreachable(self) -> None:
+        self._misses = getattr(self, "_misses", 0) + 1
+        # Two consecutive misses before flipping the light off — a single
+        # failed poll during a restart shouldn't make the UI flicker.
+        if self._misses < 2:
+            return
+        if self.proc is not None:
+            return
+        if self.status_var.get().startswith("运行中"):
+            self.status_var.set("未启动")
+            self._set_dot(TEXT_FAINT)
+            self.toggle_btn.configure_text("▶  启动")
+            self.toggle_btn.configure_fill(ACCENT_STRONG, ACCENT)
+            self.toggle_btn.set_enabled(True)
+            self.big_sub.set("启动后，这里会显示每次对话少发了多少内容")
+            self.bar.set_empty()
 
     def _render_stats(self, data: dict) -> None:
         recent = data.get("recent") or {}
         before = recent.get("tokens_before_total", 0)
         after = recent.get("tokens_after_total", 0)
+
         if before:
             pct = (before - after) / before * 100
             self.big_var.set(f"{_fmt(before)}  →  {_fmt(after)}")
+            self.big_label.configure(fg=TEXT if pct > 0 else WARN)
             self.big_sub.set(f"最近这次请求，少发了 {pct:.0f}% 的内容")
+            self.bar.set_ratio(
+                after / before if before else 1.0,
+                f"原本要发 {_fmt(before)} token",
+                f"整理后 {_fmt(after)} token",
+            )
+            if before != self._last_before:
+                self._last_before = before
+                self.bar.flash()
+
         total_saved = data.get("tokens_saved_total", 0)
         count = data.get("request_count", 0)
         if count:
-            self.total_var.set(f"累计 {count} 次对话，一共省下 {_fmt(total_saved)} token")
+            self.total_var.set(
+                f"累计 {count} 次对话  ·  一共少发 {_fmt(total_saved)} token"
+            )
 
     # --------------------------------------------------------- 一键接入 ---
     def _one_click_patch(self) -> None:
@@ -389,12 +604,15 @@ class LauncherApp:
         pet_dir = filedialog.askdirectory(title=f"选择 {platform} 的安装目录")
         if not pet_dir:
             return
+        self.patch_btn.set_enabled(False)
         threading.Thread(
             target=self._run_patch, args=(platform, Path(pet_dir)), daemon=True
         ).start()
 
     def _run_patch(self, platform: str, pet_dir: Path) -> None:
-        log = lambda m: self._log(m)  # noqa: E731
+        def log(msg: str) -> None:
+            self._log(str(msg))
+
         try:
             if platform == PLATFORM_CYRENE:
                 import patch_cyrene
@@ -425,18 +643,17 @@ class LauncherApp:
             else:
                 return
         except Exception as e:
-            self._log(f"改配置失败：{e}", "error")
+            self.root.after(0, lambda: self._patch_done(f"改配置失败：{e}", ok=False))
             return
-        self._log(f"{platform} 配置已改好，重启它就能生效", "ok")
+        self.root.after(
+            0, lambda: self._patch_done(f"{platform} 配置已改好，重启它就能生效", ok=True)
+        )
+
+    def _patch_done(self, msg: str, ok: bool) -> None:
+        self._log(msg, "ok" if ok else "error")
+        self.patch_btn.set_enabled(True)
 
     # --------------------------------------------------------------- 杂 ---
-    def _initial_log(self) -> None:
-        exe = _find_proxy_exe()
-        if exe:
-            self._log(f"已找到代理程序：{exe.name}", "ok")
-        else:
-            self._log("未找到 roleplay-slim-proxy.exe（开发模式下会用 Python 直接跑）", "warn")
-
     def _log(self, msg: str, tag: str = "") -> None:
         self._log_queue.append((msg, tag))
         if self._after_id is None:

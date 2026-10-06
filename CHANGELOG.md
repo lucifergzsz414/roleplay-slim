@@ -10,6 +10,14 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ### Added
 
+- Phone launcher for Termux/Android (`integrations/termux/`), so the same
+  proxy can sit in front of SillyTavern or any OpenAI-compatible app on a
+  phone. One script: installs Python + roleplay-slim on first run, then
+  starts the proxy, prints the URL to paste into the app, and live-renders
+  the savings. Like the desktop launcher it never asks for an API key —
+  the caller's own credential is forwarded upstream unchanged. Handles the
+  Android-specific bits (wake lock, no non-`pkg` dependencies) and adapts
+  its bar glyphs to the terminal's encoding instead of assuming UTF-8.
 - Native Anthropic Messages API support: `POST /v1/messages`, parallel to
   the existing OpenAI-shaped `/v1/chat/completions` — not a translation
   layer between the two formats (explicitly out of scope, see
