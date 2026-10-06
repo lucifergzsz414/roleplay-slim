@@ -177,7 +177,8 @@ cmd_start() {
             runner="python -m roleplay_slim.proxy"
         fi
 
-        # Android 会随时冻结后台进程，没有唤醒锁的话聊到一半代理就没了
+        # Android 会随时冻结后台进程。这里先拿锁再启动，免得代理刚起来
+        # 就被冻在半路（下面在 if/else 外面还有一次，覆盖"本来就在跑"的情况）。
         if in_termux && have termux-wake-lock; then
             termux-wake-lock 2>/dev/null || true
         fi
@@ -203,7 +204,8 @@ cmd_start() {
         ok "代理已启动"
     fi
 
-    # 唤醒锁只在 Termux 里，且只在真的被占用时提示
+    # 唤醒锁：Termux 下只管拿，解锁交给 stop。start 路径上重复调用是无害的
+    # （termux-wake-lock 本身幂等），这里保证"代理本来就在跑"时锁也是held。
     if in_termux && have termux-wake-lock; then
         termux-wake-lock 2>/dev/null || true
     fi
@@ -219,7 +221,14 @@ cmd_stop() {
         ok "已停止"
     else
         rm -f "$PIDFILE"
-        warn "本来就没在跑"
+        # 端口上确实有东西、但不是这个脚本起的：pid 文件里没有它的 pid，
+        # 硬杀有可能误伤别的进程，所以只如实说明，不动手。
+        if probe_port; then
+            warn "端口 $PORT 上还有一个代理在跑，但不是这个脚本启动的，停不掉它"
+            say "  ${C_DIM}它可能是别的窗口/终端起的，去那边停。${C_RESET}"
+        else
+            warn "本来就没在跑"
+        fi
     fi
     if in_termux && have termux-wake-unlock; then
         termux-wake-unlock 2>/dev/null || true
