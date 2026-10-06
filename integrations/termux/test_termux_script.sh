@@ -184,6 +184,23 @@ cmd_stop >/dev/null 2>&1 || true   # 进程已经手动 kill 了，这里只验�
 grep -q wake-unlock "$CALLS" && pass "stop 会释放唤醒锁" || fail "stop 没释放唤醒锁"
 
 echo
+echo "== 8. 陈旧 PID 不得误杀无关进程 =="
+# 模拟旧 PID 被系统复用：让 PID 文件指向一个普通 sleep 进程。
+# stop 必须只清理记录，不能杀掉该进程。
+in_termux() { return 1; }
+sleep 60 &
+UNRELATED_PID=$!
+printf '%s\n' "$UNRELATED_PID" > "$PIDFILE"
+cmd_stop >/dev/null 2>&1
+if kill -0 "$UNRELATED_PID" 2>/dev/null; then
+    pass "旧 PID 指向无关进程时只清理记录，不终止该进程"
+else
+    fail "旧 PID 误杀了无关进程"
+fi
+kill "$UNRELATED_PID" 2>/dev/null || true
+wait "$UNRELATED_PID" 2>/dev/null || true
+
+echo
 if [ "$FAIL" -eq 0 ]; then
     printf '\033[38;5;84m%s\033[0m\n' "全部通过"
 else

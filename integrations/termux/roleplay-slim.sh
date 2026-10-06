@@ -144,8 +144,21 @@ is_running() {
     [ -f "$PIDFILE" ] || return 1
     local pid
     pid="$(cat "$PIDFILE" 2>/dev/null)"
-    [ -n "$pid" ] || return 1
-    kill -0 "$pid" 2>/dev/null
+    case "$pid" in *[!0-9]*|"") return 1 ;; esac
+    kill -0 "$pid" 2>/dev/null || return 1
+    pid_belongs_to_proxy "$pid"
+}
+
+# PID 文件可能跨重启残留，而 PID 会被系统复用。仅凭 kill -0 就执行 kill
+# 可能误伤后来取得相同 PID 的无关进程，因此还要核对进程命令行。
+pid_belongs_to_proxy() {
+    local pid="$1" cmdline
+    [ -r "/proc/$pid/cmdline" ] || return 1
+    cmdline="$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" || return 1
+    case "$cmdline" in
+        *roleplay-slim-proxy*|*roleplay_slim.proxy*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # 端口上有没有东西在应答（可能不是本脚本起的）
@@ -175,12 +188,6 @@ cmd_start() {
             runner="roleplay-slim-proxy"
         else
             runner="python -m roleplay_slim.proxy"
-        fi
-
-        # Android 会随时冻结后台进程。这里先拿锁再启动，免得代理刚起来
-        # 就被冻在半路（下面在 if/else 外面还有一次，覆盖"本来就在跑"的情况）。
-        if in_termux && have termux-wake-lock; then
-            termux-wake-lock 2>/dev/null || true
         fi
 
         say "正在启动…"
@@ -220,7 +227,14 @@ cmd_stop() {
         rm -f "$PIDFILE"
         ok "已停止"
     else
+        local stale_pid=""
+        if [ -f "$PIDFILE" ]; then
+            stale_pid="$(cat "$PIDFILE" 2>/dev/null)"
+        fi
         rm -f "$PIDFILE"
+        if [ -n "$stale_pid" ]; then
+            warn "发现无效或不属于 roleplay-slim 的旧 PID 记录，已清理但没有终止任何进程"
+        fi
         # 端口上确实有东西、但不是这个脚本起的：pid 文件里没有它的 pid，
         # 硬杀有可能误伤别的进程，所以只如实说明，不动手。
         if probe_port; then
