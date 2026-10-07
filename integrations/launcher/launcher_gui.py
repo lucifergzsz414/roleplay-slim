@@ -79,11 +79,27 @@ for _sub in ("installer", "installer_bandori", "installer_cyrene"):
 _PROXY_EXE_NAME = "roleplay-slim-proxy.exe"
 DEFAULT_PORT = 8795  # 8791=若叶睦 8792=邦多利 8793=Cyrene，这里另起一个避免打架
 
-UPSTREAM_PRESETS: dict[str, str] = {
-    "DeepSeek": "https://api.deepseek.com/v1",
-    "OpenAI": "https://api.openai.com/v1",
-    "SiliconFlow 硅基流动": "https://api.siliconflow.cn/v1",
-    "自定义…": "",
+UPSTREAM_PRESETS: dict[str, dict[str, str]] = {
+    "DeepSeek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "",
+    },
+    "阿里云百炼": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen3.6-plus",
+    },
+    "OpenAI": {
+        "base_url": "https://api.openai.com/v1",
+        "model": "",
+    },
+    "SiliconFlow 硅基流动": {
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "",
+    },
+    "自定义…": {
+        "base_url": "",
+        "model": "",
+    },
 }
 
 PLATFORM_UNIVERSAL = "通用模式（任何能填 API 地址的软件）"
@@ -94,8 +110,8 @@ PLATFORMS = [PLATFORM_UNIVERSAL, PLATFORM_MUTSUMI, PLATFORM_BANDORI, PLATFORM_CY
 
 CONFIG_TOML = """# roleplay-slim 启动器自动生成，不需要手动改
 [proxy]
-upstream_base_url = "{upstream}"
-upstream_api_key_env = "ROLEPLAY_SLIM_UNUSED_KEY"
+upstream_base_url = {upstream}
+{upstream_model_line}upstream_api_key_env = "ROLEPLAY_SLIM_UNUSED_KEY"
 host = "127.0.0.1"
 port = {port}
 
@@ -109,7 +125,7 @@ history_window_mode = "trim"
 
 [stats]
 persist = true
-db_path = "{db_path}"
+db_path = {db_path}
 """
 
 
@@ -156,6 +172,23 @@ def _validate_upstream_url(value: str) -> str:
     ):
         raise ValueError("请输入不含账号、查询参数或换行的 http/https 地址。")
     return value
+
+
+def _render_config(
+    *, upstream: str, model: str, port: int, db_path: Path
+) -> str:
+    """Render launcher TOML without allowing user text to alter its structure."""
+    upstream = _validate_upstream_url(upstream)
+    model = model.strip()
+    model_line = (
+        f"upstream_model = {json.dumps(model, ensure_ascii=False)}\n" if model else ""
+    )
+    return CONFIG_TOML.format(
+        upstream=json.dumps(upstream, ensure_ascii=False),
+        upstream_model_line=model_line,
+        port=port,
+        db_path=json.dumps(str(db_path), ensure_ascii=False),
+    )
 
 
 class LauncherApp:
@@ -307,13 +340,31 @@ class LauncherApp:
         combo.pack(fill=tk.X)
         combo.bind("<<ComboboxSelected>>", self._on_upstream_change)
 
-        self.upstream_url = tk.StringVar(value=UPSTREAM_PRESETS["DeepSeek"])
+        self.upstream_url = tk.StringVar(
+            value=UPSTREAM_PRESETS["DeepSeek"]["base_url"]
+        )
         self.upstream_entry = tk.Entry(
             row, textvariable=self.upstream_url, font=mono(9), state="readonly",
             bg=BG, fg=TEXT_DIM, readonlybackground=BG, relief=tk.FLAT,
             insertbackground=TEXT, disabledbackground=BG, disabledforeground=TEXT_FAINT,
         )
         self.upstream_entry.pack(fill=tk.X, pady=(8, 0), ipady=5)
+
+        tk.Label(
+            row, text="模型名称", bg=CARD, fg=TEXT_DIM, font=font(8),
+        ).pack(anchor=tk.W, pady=(9, 0))
+        self.upstream_model = tk.StringVar(
+            value=UPSTREAM_PRESETS["DeepSeek"]["model"]
+        )
+        tk.Entry(
+            row, textvariable=self.upstream_model, font=mono(9),
+            bg=BG, fg=TEXT, relief=tk.FLAT, insertbackground=TEXT,
+        ).pack(fill=tk.X, pady=(4, 0), ipady=5)
+
+        tk.Label(
+            row, text="留空时沿用聊天软件请求的模型",
+            bg=CARD, fg=TEXT_FAINT, font=font(8),
+        ).pack(anchor=tk.W, pady=(5, 0))
 
         tk.Label(
             b, text="✓  无需在这里填写 API Key",
@@ -456,6 +507,7 @@ class LauncherApp:
     # ------------------------------------------------------------- 事件 ---
     def _on_upstream_change(self, _evt=None) -> None:
         name = self.upstream_name.get()
+        preset = UPSTREAM_PRESETS[name]
         if name == "自定义…":
             self.upstream_entry.configure(
                 state=tk.NORMAL, fg=TEXT, bg=BG, readonlybackground=BG,
@@ -465,7 +517,8 @@ class LauncherApp:
             self.upstream_entry.configure(
                 state="readonly", fg=TEXT_DIM, readonlybackground=BG,
             )
-            self.upstream_url.set(UPSTREAM_PRESETS[name])
+            self.upstream_url.set(preset["base_url"])
+        self.upstream_model.set(preset["model"])
 
     def _on_platform_change(self, _evt=None) -> None:
         if self.platform.get() == PLATFORM_UNIVERSAL:
@@ -499,9 +552,11 @@ class LauncherApp:
         work = _work_dir()
         cfg = work / "config.toml"
         cfg.write_text(
-            CONFIG_TOML.format(
-                upstream=upstream, port=self.port,
-                db_path=str(work / "stats.db").replace("\\", "\\\\"),
+            _render_config(
+                upstream=upstream,
+                model=self.upstream_model.get(),
+                port=self.port,
+                db_path=work / "stats.db",
             ),
             encoding="utf-8",
         )

@@ -4,12 +4,16 @@ import sys
 import types
 from pathlib import Path
 
+import tomllib
+
 LAUNCHER_DIR = Path(__file__).resolve().parents[1] / "integrations" / "launcher"
 sys.path.insert(0, str(LAUNCHER_DIR))
 
 from launcher_gui import (  # noqa: E402
     PLATFORM_CYRENE,
+    UPSTREAM_PRESETS,
     LauncherApp,
+    _render_config,
     _validate_upstream_url,
 )
 from theme import round_rect_points  # noqa: E402
@@ -90,3 +94,38 @@ def test_upstream_url_rejects_toml_injection_and_credentials() -> None:
         except ValueError:
             continue
         raise AssertionError(f"unsafe upstream URL accepted: {value!r}")
+
+
+def test_launcher_provider_presets_include_bailian_model() -> None:
+    assert UPSTREAM_PRESETS["阿里云百炼"]["base_url"] == (
+        "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+    assert UPSTREAM_PRESETS["阿里云百炼"]["model"] == "qwen3.6-plus"
+
+
+def test_render_config_writes_explicit_model_override() -> None:
+    rendered = _render_config(
+        upstream="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model="qwen3.6-plus",
+        port=8795,
+        db_path=Path(r"C:\Users\Example\stats.db"),
+    )
+
+    parsed = tomllib.loads(rendered)
+    assert parsed["proxy"]["upstream_base_url"] == (
+        "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+    assert parsed["proxy"]["upstream_model"] == "qwen3.6-plus"
+    assert parsed["stats"]["db_path"] == r"C:\Users\Example\stats.db"
+
+
+def test_render_config_omits_blank_model_to_preserve_client_request() -> None:
+    rendered = _render_config(
+        upstream="https://api.deepseek.com/v1",
+        model="  ",
+        port=8795,
+        db_path=Path("stats.db"),
+    )
+
+    parsed = tomllib.loads(rendered)
+    assert "upstream_model" not in parsed["proxy"]
