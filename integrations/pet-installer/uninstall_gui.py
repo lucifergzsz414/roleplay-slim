@@ -30,6 +30,7 @@ else:
 sys.path.insert(0, str(_bundle_dir / "installer"))
 
 from install import uninstall  # noqa: E402
+from safe_process import stop_installed_proxy  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,26 +62,6 @@ def _auto_detect_pet_dir() -> str:
     except OSError:
         pass
     return ""
-
-
-def _stop_running_proxy() -> bool:
-    """Kill whatever process is listening on the proxy port, so the
-    roleplay-slim-proxy folder can actually be deleted. Returns True if a
-    process was found and stopped."""
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            [
-                "powershell", "-NoProfile", "-Command",
-                f"$c=Get-NetTCPConnection -LocalPort {_PROXY_PORT} -ErrorAction Stop;"
-                f"Stop-Process -Id $c.OwningProcess -Force;Write-Output $c.OwningProcess",
-            ],
-            capture_output=True, text=True, timeout=10,
-        )
-        return bool(result.stdout.strip())
-    except Exception:
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +216,7 @@ class UninstallerApp:
 
     def _run_uninstall(self, pet_dir: Path) -> None:
         try:
-            if _stop_running_proxy():
+            if stop_installed_proxy(pet_dir, _PROXY_PORT):
                 self._log("已停止正在运行的代理进程", tag="info")
             uninstall(pet_dir, log=self._log)
         except Exception as exc:

@@ -27,6 +27,7 @@ else:
 sys.path.insert(0, str(_bundle_dir / "installer_bandori"))
 
 from patch_bandori import uninstall_bandori  # noqa: E402
+from safe_process import stop_installed_proxy  # noqa: E402
 
 _PROXY_PORT = 8792
 
@@ -43,23 +44,6 @@ def _auto_detect_pet_dir() -> str:
         except OSError:
             continue
     return ""
-
-
-def _stop_running_proxy() -> bool:
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            [
-                "powershell", "-NoProfile", "-Command",
-                f"$c=Get-NetTCPConnection -LocalPort {_PROXY_PORT} -ErrorAction Stop;"
-                f"Stop-Process -Id $c.OwningProcess -Force;Write-Output $c.OwningProcess",
-            ],
-            capture_output=True, text=True, timeout=10,
-        )
-        return bool(result.stdout.strip())
-    except Exception:
-        return False
 
 
 class UninstallerApp:
@@ -195,7 +179,7 @@ class UninstallerApp:
 
     def _run_uninstall(self, pet_dir: Path) -> None:
         try:
-            if _stop_running_proxy():
+            if stop_installed_proxy(pet_dir, _PROXY_PORT):
                 self._log("已停止正在运行的代理进程", tag="info")
             uninstall_bandori(pet_dir, log=self._log)
         except Exception as exc:

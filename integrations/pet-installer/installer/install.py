@@ -10,11 +10,18 @@ Usage:
 """
 
 import os
-import sys
 import shutil
 import struct
+import sys
 import winreg
 from pathlib import Path
+
+_PET_INSTALLER_DIR = Path(__file__).resolve().parents[1]
+if str(_PET_INSTALLER_DIR) not in sys.path:
+    sys.path.insert(0, str(_PET_INSTALLER_DIR))
+
+from credential_store import write_dpapi_credential  # noqa: E402
+from safe_process import write_stop_script  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -60,10 +67,9 @@ stage_direction_pattern = "fullwidth_parens"
 """
 
 LAUNCH_PROXY_BAT = """@echo off
-set "UPSTREAM_API_KEY={api_key}"
 title roleplay-slim-proxy
 cd /d "%~dp0"
-"%~dp0roleplay-slim-proxy\\roleplay-slim-proxy.exe" --config "%~dp0roleplay-slim-proxy\\config.toml"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0roleplay-slim-proxy\\launch_proxy.ps1"
 """
 
 LAUNCH_PET_BAT = r"""@echo off
@@ -92,7 +98,7 @@ echo [2/3] 等待代理就绪...
 powershell -Command ^"$i=0; while($i -lt 30){try{$r=Invoke-WebRequest 'http://127.0.0.1:{port}/healthz' -TimeoutSec 1 -UseBasicParsing;if($r.StatusCode -eq 200){exit 0}}catch{}$i++;Start-Sleep 1};exit 1^"
 if errorlevel 1 (
     echo [错误] 代理启动超时，请关闭杀毒软件后重试
-    taskkill /fi "WINDOWTITLE eq roleplay-slim-proxy*" /f >nul 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0roleplay-slim-proxy\stop_proxy.ps1" >nul 2>&1
     pause
     exit /b 1
 )
@@ -103,7 +109,7 @@ start "" /wait "若叶睦桌宠.exe"
 
 :: Pet closed — shut down proxy
 echo 桌宠已关闭，停止代理...
-powershell -Command ^"try{$c=Get-NetTCPConnection -LocalPort {port} -ErrorAction Stop;Stop-Process -Id $c.OwningProcess -Force -ErrorAction Stop}catch{}^"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0roleplay-slim-proxy\stop_proxy.ps1" >nul 2>&1
 
 exit
 """
@@ -454,7 +460,7 @@ def main() -> None:
     print("\n[2/6] 读取 API Key...")
     api_key = read_api_key_from_registry()
     if api_key:
-        print(f"  [OK] 从注册表读取成功 ({api_key[:8]}...)")
+        print("  [OK] 从注册表读取成功，将使用 DPAPI 加密保存")
     else:
         print("  [warn] 未在注册表中找到 DeepSeek_API_Key")
         api_key = input("  请手动输入 DeepSeek API Key (sk-...): ").strip()
@@ -499,15 +505,14 @@ def main() -> None:
     config_dir.mkdir(exist_ok=True)
     config_path = config_dir / "config.toml"
     config_path.write_text(CONFIG_TOML.format(port=PROXY_PORT), encoding="utf-8")
+    write_stop_script(config_dir, PROXY_PORT)
+    write_dpapi_credential(config_dir, api_key)
     print(f"  [OK] 配置写入: {config_path}")
 
     # 6. Write proxy launcher
     print(f"\n[6/7] 创建启动脚本...")
     proxy_bat = pet_dir / "启动代理.bat"
-    proxy_bat.write_text(
-        LAUNCH_PROXY_BAT.format(api_key=api_key),
-        encoding="gbk",
-    )
+    proxy_bat.write_text(LAUNCH_PROXY_BAT, encoding="gbk")
     print(f"  [OK] {proxy_bat}")
 
     # 7. Write main launcher

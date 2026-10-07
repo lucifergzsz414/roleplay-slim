@@ -36,6 +36,7 @@ from patch_cyrene import (  # noqa: E402
     find_cyrene_exe,
     find_model_settings_path,
     patch_model_settings,
+    write_stop_script,
 )
 
 _PROXY_EXE_NAME = "roleplay-slim-proxy.exe"
@@ -248,6 +249,7 @@ class InstallerApp:
         (config_dir / "config.toml").write_text(
             CONFIG_TOML.format(port=PROXY_PORT), encoding="utf-8"
         )
+        write_stop_script(config_dir, PROXY_PORT)
         log("  config.toml", tag="ok")
 
         proxy_src = _find_proxy_exe()

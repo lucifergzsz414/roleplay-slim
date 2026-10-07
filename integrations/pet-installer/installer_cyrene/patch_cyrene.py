@@ -38,6 +38,12 @@ import shutil
 import sys
 from pathlib import Path
 
+_PET_INSTALLER_DIR = Path(__file__).resolve().parents[1]
+if str(_PET_INSTALLER_DIR) not in sys.path:
+    sys.path.insert(0, str(_PET_INSTALLER_DIR))
+
+from safe_process import write_stop_script  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -92,7 +98,7 @@ echo [2/3] 等待代理就绪...
 powershell -Command ^"$i=0; while($i -lt 30){try{$r=Invoke-WebRequest 'http://127.0.0.1:{port}/healthz' -TimeoutSec 1 -UseBasicParsing;if($r.StatusCode -eq 200){exit 0}}catch{}$i++;Start-Sleep 1};exit 1^"
 if errorlevel 1 (
     echo [错误] 代理启动超时，请关闭杀毒软件后重试
-    taskkill /fi "WINDOWTITLE eq roleplay-slim-proxy-cyrene*" /f >nul 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0roleplay-slim-proxy\stop_proxy.ps1" >nul 2>&1
     pause
     exit /b 1
 )
@@ -101,7 +107,7 @@ echo [3/3] 启动 Cyrene...
 start "" /wait "Cyrene.exe"
 
 echo Cyrene 已关闭，停止代理...
-powershell -Command ^"try{$c=Get-NetTCPConnection -LocalPort {port} -ErrorAction Stop;Stop-Process -Id $c.OwningProcess -Force -ErrorAction Stop}catch{}^"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0roleplay-slim-proxy\stop_proxy.ps1" >nul 2>&1
 
 exit
 """
@@ -297,6 +303,7 @@ def main() -> None:
     (config_dir / "config.toml").write_text(
         CONFIG_TOML.format(port=PROXY_PORT), encoding="utf-8"
     )
+    write_stop_script(config_dir, PROXY_PORT)
     print("  [OK] config.toml 写入")
 
     (pet_dir / "启动代理.bat").write_text(LAUNCH_PROXY_BAT, encoding="gbk")

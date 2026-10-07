@@ -38,6 +38,7 @@ from patch_bandori import (  # noqa: E402
     find_ai_config,
     find_index_html,
     patch_text_file,
+    write_stop_script,
 )
 
 _PROXY_EXE_NAME = "roleplay-slim-proxy.exe"
@@ -279,6 +280,7 @@ class InstallerApp:
         (config_dir / "config.toml").write_text(
             CONFIG_TOML.format(port=PROXY_PORT), encoding="utf-8"
         )
+        write_stop_script(config_dir, PROXY_PORT)
         log(f"  config.toml", tag="ok")
 
         proxy_src = _find_proxy_exe()

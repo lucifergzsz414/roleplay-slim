@@ -9,7 +9,6 @@ that bundles its own Python runtime.
 
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 import threading
@@ -43,13 +42,13 @@ from install import (  # noqa: E402
     LAUNCH_PET_BAT,
     LAUNCH_PROXY_BAT,
     PROXY_PORT,
-    DEEPSEEK_URL,
-    PROXY_URL,
     find_level0,
     find_metadata,
-    read_api_key_from_registry,
     patch_file,
     patch_registry_url,
+    read_api_key_from_registry,
+    write_dpapi_credential,
+    write_stop_script,
 )
 
 # ---------------------------------------------------------------------------
@@ -389,7 +388,7 @@ class InstallerApp:
         log("")
         log("[3/7] API Key...", tag="bold")
         if api_key:
-            log(f"  ✓ 已获取 ({api_key[:8]}...)", tag="ok")
+            log("  ✓ 已获取并准备加密保存", tag="ok")
         else:
             log(f"  ⚠ 未提供 API Key，启动脚本中需手动填写", tag="warn")
 
@@ -450,6 +449,7 @@ class InstallerApp:
             CONFIG_TOML.format(port=PROXY_PORT),
             encoding="utf-8",
         )
+        write_stop_script(config_dir, PROXY_PORT)
         log(f"  ✓ config.toml", tag="ok")
 
         # --- 7. Copy proxy exe ---
@@ -469,10 +469,8 @@ class InstallerApp:
         log("[7/7] 创建启动脚本...", tag="bold")
 
         proxy_bat = pet_dir / "启动代理.bat"
-        proxy_bat.write_text(
-            LAUNCH_PROXY_BAT.format(api_key=api_key),
-            encoding="gbk",
-        )
+        write_dpapi_credential(config_dir, api_key)
+        proxy_bat.write_text(LAUNCH_PROXY_BAT, encoding="gbk")
         log(f"  ✓ 启动代理.bat", tag="ok")
 
         pet_bat = pet_dir / "若叶睦.bat"
