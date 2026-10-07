@@ -5,8 +5,10 @@ import types
 from pathlib import Path
 
 import tomllib
+from PIL import Image
 
 LAUNCHER_DIR = Path(__file__).resolve().parents[1] / "integrations" / "launcher"
+ASSETS_DIR = LAUNCHER_DIR / "assets"
 sys.path.insert(0, str(LAUNCHER_DIR))
 
 from launcher_gui import (  # noqa: E402
@@ -17,10 +19,12 @@ from launcher_gui import (  # noqa: E402
     _validate_upstream_url,
 )
 from theme import (  # noqa: E402
+    ACCENT_SOFT,
     ACCENT_STRONG,
     BG,
     CARD,
     INPUT,
+    SUCCESS_SOFT,
     TEXT,
     round_rect_points,
 )
@@ -54,6 +58,24 @@ def test_launcher_theme_uses_the_reviewed_light_palette() -> None:
     assert INPUT == "#F7F9FC"
     assert TEXT == "#172033"
     assert ACCENT_STRONG == "#2563EB"
+    assert ACCENT_SOFT == "#EAF2FF"
+    assert SUCCESS_SOFT == "#EAF7F1"
+
+
+def test_launcher_icon_assets_cover_header_and_windows_sizes() -> None:
+    with Image.open(ASSETS_DIR / "app_icon.png") as icon:
+        assert icon.size == (512, 512)
+        assert icon.mode == "RGBA"
+        assert icon.getchannel("A").getextrema() == (0, 255)
+
+    with Image.open(ASSETS_DIR / "app_header.png") as header:
+        assert header.size == (44, 44)
+
+    with Image.open(ASSETS_DIR / "app.ico") as windows_icon:
+        assert {
+            (16, 16), (20, 20), (24, 24), (32, 32), (40, 40),
+            (48, 48), (64, 64), (128, 128), (256, 256),
+        }.issubset(windows_icon.info["sizes"])
 
 
 def test_patch_error_survives_deferred_tk_callback(monkeypatch) -> None:

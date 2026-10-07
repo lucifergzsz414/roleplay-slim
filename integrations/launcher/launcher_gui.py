@@ -34,6 +34,7 @@ from urllib.parse import urlsplit
 from theme import (
     ACCENT,
     ACCENT_DARK,
+    ACCENT_SOFT,
     ACCENT_STRONG,
     BANNER,
     BG,
@@ -42,6 +43,7 @@ from theme import (
     DANGER,
     INPUT,
     SUCCESS,
+    SUCCESS_SOFT,
     TEXT,
     TEXT_DIM,
     TEXT_FAINT,
@@ -291,15 +293,20 @@ class LauncherApp:
         head = tk.Frame(self.root, bg=BANNER)
         head.pack(fill=tk.X, padx=24, pady=(20, 16), ipady=8)
 
-        mark = tk.Canvas(
-            head, width=38, height=38, bg=BANNER,
-            highlightthickness=0, bd=0,
-        )
-        mark.create_rectangle(1, 1, 37, 37, fill=ACCENT_STRONG, outline="")
-        mark.create_line(10, 12, 28, 12, fill="#FFFFFF", width=3)
-        mark.create_line(10, 19, 25, 19, fill="#FFFFFF", width=3)
-        mark.create_line(10, 26, 21, 26, fill="#FFFFFF", width=3)
-        mark.pack(side=tk.LEFT, padx=(0, 12))
+        if self._icon_img is not None:
+            tk.Label(head, image=self._icon_img, bg=BANNER).pack(
+                side=tk.LEFT, padx=(0, 12)
+            )
+        else:
+            mark = tk.Canvas(
+                head, width=38, height=38, bg=BANNER,
+                highlightthickness=0, bd=0,
+            )
+            mark.create_rectangle(1, 1, 37, 37, fill=ACCENT_STRONG, outline="")
+            mark.create_line(10, 12, 28, 12, fill="#FFFFFF", width=3)
+            mark.create_line(10, 19, 25, 19, fill="#FFFFFF", width=3)
+            mark.create_line(10, 26, 21, 26, fill="#FFFFFF", width=3)
+            mark.pack(side=tk.LEFT, padx=(0, 12))
 
         titles = tk.Frame(head, bg=BANNER)
         titles.pack(side=tk.LEFT, anchor=tk.W)
@@ -314,7 +321,7 @@ class LauncherApp:
         ).pack(anchor=tk.W, pady=(3, 0))
 
         badge = tk.Label(
-            head, text="本地处理 · 不保存 API Key", bg=BG, fg=SUCCESS,
+            head, text="本地处理 · 不保存 API Key", bg=SUCCESS_SOFT, fg=SUCCESS,
             font=font(8, bold=True), padx=12, pady=7,
         )
         badge.pack(side=tk.RIGHT, padx=(12, 0))
@@ -420,7 +427,8 @@ class LauncherApp:
         self.url_display.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=7)
         self.copy_btn = PillButton(
             row, "复制", command=self._copy_url, width=74, height=36,
-            fill=TEXT_DIM, hover=TEXT, font_=font(9, bold=True),
+            fill=ACCENT_SOFT, hover=BORDER, fg=ACCENT_DARK,
+            font_=font(9, bold=True),
         )
         self.copy_btn.pack(side=tk.RIGHT, padx=(10, 0))
         tk.Label(
