@@ -7,7 +7,7 @@ pieces that actually need to look good — a rounded pill button, a card, and
 a rounded progress bar — as thin Canvas-based widgets, and configures ttk
 for the rest.
 
-Everything is flat, borderless and driven by one palette below, so
+Everything is flat, quiet and driven by one palette below, so
 restyling is a one-place change.
 """
 
@@ -17,25 +17,26 @@ import tkinter as tk
 from tkinter import ttk
 
 # ---------------------------------------------------------------------------
-# Palette — violet accent, matching assets/app.ico
+# Palette — neutral surfaces with one functional blue accent
 # ---------------------------------------------------------------------------
-BG = "#12141A"
-CARD = "#1A1D26"
-BANNER = "#161923"
-BORDER = "#262A36"
-BORDER_SOFT = "#1F2330"
+BG = "#F3F6FA"
+CARD = "#FFFFFF"
+BANNER = "#FFFFFF"
+INPUT = "#F7F9FC"
+BORDER = "#DCE3EC"
+BORDER_SOFT = "#DCE3EC"
 
-TEXT = "#E9EAEE"
-TEXT_DIM = "#8B90A0"
-TEXT_FAINT = "#5C6273"
+TEXT = "#172033"
+TEXT_DIM = "#526174"
+TEXT_FAINT = "#667085"
 
-ACCENT = "#A78BFA"
-ACCENT_STRONG = "#7C5CF6"
-ACCENT_DARK = "#5B3FD6"
+ACCENT = "#3B82F6"
+ACCENT_STRONG = "#2563EB"
+ACCENT_DARK = "#1D4ED8"
 
-SUCCESS = "#4ADE80"
-WARN = "#FBBF24"
-DANGER = "#F87171"
+SUCCESS = "#16865C"
+WARN = "#9A6700"
+DANGER = "#C43D4B"
 
 FONT = "Microsoft YaHei UI"
 MONO = "Consolas"
@@ -101,7 +102,7 @@ class PillButton(tk.Canvas):
         self._fill = fill
         self._hover = hover
         self._enabled = True
-        self._radius = radius if radius is not None else height // 2
+        self._radius = radius if radius is not None else 10
 
         self._shape = self.create_polygon(
             round_rect_points(1, 1, width - 1, height - 1, self._radius),
@@ -256,15 +257,15 @@ def apply_ttk_theme(root: tk.Misc) -> ttk.Style:
 
     style.configure(
         "RS.TCombobox",
-        fieldbackground=CARD, background=CARD, foreground=TEXT,
+        fieldbackground=INPUT, background=INPUT, foreground=TEXT,
         arrowcolor=TEXT_DIM, bordercolor=BORDER, lightcolor=BORDER,
-        darkcolor=BORDER, selectbackground=CARD, selectforeground=TEXT,
+        darkcolor=BORDER, selectbackground=INPUT, selectforeground=TEXT,
         padding=8,
     )
     style.map(
         "RS.TCombobox",
-        fieldbackground=[("readonly", CARD)],
-        bordercolor=[("focus", ACCENT_STRONG), ("hover", BORDER)],
+        fieldbackground=[("readonly", INPUT)],
+        bordercolor=[("focus", ACCENT_STRONG), ("hover", ACCENT)],
         arrowcolor=[("hover", ACCENT)],
     )
     root.option_add("*TCombobox*Listbox.background", CARD)
@@ -275,7 +276,7 @@ def apply_ttk_theme(root: tk.Misc) -> ttk.Style:
 
     style.configure(
         "RS.Vertical.TScrollbar",
-        background=BORDER, troughcolor=BG, bordercolor=BG,
+        background=BORDER, troughcolor=CARD, bordercolor=CARD,
         arrowcolor=TEXT_FAINT, darkcolor=BORDER, lightcolor=BORDER,
     )
     return style

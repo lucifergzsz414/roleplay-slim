@@ -16,7 +16,14 @@ from launcher_gui import (  # noqa: E402
     _render_config,
     _validate_upstream_url,
 )
-from theme import round_rect_points  # noqa: E402
+from theme import (  # noqa: E402
+    ACCENT_STRONG,
+    BG,
+    CARD,
+    INPUT,
+    TEXT,
+    round_rect_points,
+)
 
 
 def test_round_rect_points_stay_inside_requested_bounds() -> None:
@@ -39,6 +46,14 @@ def test_round_rect_radius_is_clamped_for_small_controls() -> None:
     assert points[1] == 0
     assert points[2] == 15
     assert points[3] == 0
+
+
+def test_launcher_theme_uses_the_reviewed_light_palette() -> None:
+    assert BG == "#F3F6FA"
+    assert CARD == "#FFFFFF"
+    assert INPUT == "#F7F9FC"
+    assert TEXT == "#172033"
+    assert ACCENT_STRONG == "#2563EB"
 
 
 def test_patch_error_survives_deferred_tk_callback(monkeypatch) -> None:

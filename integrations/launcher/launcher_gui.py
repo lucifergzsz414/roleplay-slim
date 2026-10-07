@@ -40,6 +40,7 @@ from theme import (
     BORDER,
     CARD,
     DANGER,
+    INPUT,
     SUCCESS,
     TEXT,
     TEXT_DIM,
@@ -194,7 +195,7 @@ def _render_config(
 class LauncherApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("聊天记录整理器 · roleplay-slim")
+        self.root.title("roleplay-slim · 长对话整理器")
         self.root.configure(bg=BG)
 
         self.style = apply_ttk_theme(self.root)
@@ -211,8 +212,8 @@ class LauncherApp:
         self._set_window_icon()
         self._build_ui()
         self._center()
-        self._enable_dark_titlebar()
-        self._log("准备好了，选好上面的两项就可以点「启动」。", "info")
+        self._enable_light_titlebar()
+        self._log("准备好了，选好上面的两项就可以点「启动整理」。", "info")
         # Keep watching the port for the window's whole life, not only after
         # we started the proxy ourselves. Otherwise a GUI restarted while a
         # proxy is still running shows "未启动" while the port is in fact
@@ -249,23 +250,21 @@ class LauncherApp:
         varies with the user's DPI scaling, so a fixed number was wrong on
         some machines and right on others."""
         self.root.update_idletasks()
-        w = max(self.root.winfo_reqwidth(), 700)
+        w = max(self.root.winfo_reqwidth(), 760)
         h = self.root.winfo_reqheight()
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         h = min(h, int(sh * 0.92))  # never taller than the screen
-        self.root.minsize(min(660, w), min(620, h))
+        self.root.minsize(min(720, w), min(620, h))
         self.root.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 3)}")
 
-    def _enable_dark_titlebar(self) -> None:
-        """Windows 10 1809+ draws a light title bar by default, which looks
-        broken on top of a dark window. This is a one-call DWM flag; it's
-        best-effort on purpose — older Windows just keeps the light bar."""
+    def _enable_light_titlebar(self) -> None:
+        """Keep the Windows title bar consistent with the light application."""
         try:
             import ctypes
 
             self.root.update_idletasks()
             hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
-            value = ctypes.c_int(1)
+            value = ctypes.c_int(0)
             for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE, older builds
                 res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
                     hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
@@ -279,7 +278,7 @@ class LauncherApp:
     def _build_ui(self) -> None:
         self._build_header()
         setup = tk.Frame(self.root, bg=BG)
-        setup.pack(fill=tk.X, padx=20, pady=(0, 10))
+        setup.pack(fill=tk.X, padx=24, pady=(0, 12))
         setup.grid_columnconfigure(0, weight=1, uniform="setup")
         setup.grid_columnconfigure(1, weight=1, uniform="setup")
         self._build_step1(setup)
@@ -290,46 +289,59 @@ class LauncherApp:
 
     def _build_header(self) -> None:
         head = tk.Frame(self.root, bg=BANNER)
-        head.pack(fill=tk.X, padx=20, pady=(18, 14), ipady=12)
+        head.pack(fill=tk.X, padx=24, pady=(20, 16), ipady=8)
 
-        if self._icon_img is not None:
-            tk.Label(head, image=self._icon_img, bg=BANNER).pack(side=tk.LEFT, padx=(14, 12))
+        mark = tk.Canvas(
+            head, width=38, height=38, bg=BANNER,
+            highlightthickness=0, bd=0,
+        )
+        mark.create_rectangle(1, 1, 37, 37, fill=ACCENT_STRONG, outline="")
+        mark.create_line(10, 12, 28, 12, fill="#FFFFFF", width=3)
+        mark.create_line(10, 19, 25, 19, fill="#FFFFFF", width=3)
+        mark.create_line(10, 26, 21, 26, fill="#FFFFFF", width=3)
+        mark.pack(side=tk.LEFT, padx=(0, 12))
 
         titles = tk.Frame(head, bg=BANNER)
         titles.pack(side=tk.LEFT, anchor=tk.W)
         tk.Label(
-            titles, text="聊得越久，角色越不像她？",
-            bg=BANNER, fg=TEXT, font=font(15, bold=True),
+            titles, text="roleplay-slim",
+            bg=BANNER, fg=TEXT, font=font(16, bold=True),
         ).pack(anchor=tk.W)
         tk.Label(
             titles,
-            text="保护人设和最近的对话，只整理越来越长的旧聊天记录。",
+            text="让长对话保持自然、稳定",
             bg=BANNER, fg=TEXT_DIM, font=font(9),
         ).pack(anchor=tk.W, pady=(3, 0))
 
         badge = tk.Label(
-            head, text="本地运行  ·  Key 不落盘", bg=BORDER, fg=SUCCESS,
-            font=font(8, bold=True), padx=12, pady=6,
+            head, text="本地处理 · 不保存 API Key", bg=BG, fg=SUCCESS,
+            font=font(8, bold=True), padx=12, pady=7,
         )
-        badge.pack(side=tk.RIGHT, padx=(10, 14))
+        badge.pack(side=tk.RIGHT, padx=(12, 0))
 
     def _step_title(self, parent: tk.Frame, num: str, text: str) -> None:
         row = tk.Frame(parent, bg=CARD)
         row.pack(anchor=tk.W, fill=tk.X)
         tk.Label(
-            row, text=num, bg=ACCENT_STRONG, fg="#FFFFFF",
-            font=font(8, bold=True), width=2, height=1,
-        ).pack(side=tk.LEFT, padx=(0, 8))
-        tk.Label(row, text=text, bg=CARD, fg=TEXT, font=font(10, bold=True)).pack(side=tk.LEFT)
+            row, text=f"0{num}", bg=CARD, fg=ACCENT_STRONG,
+            font=mono(9, bold=True),
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(
+            row, text=text, bg=CARD, fg=TEXT, font=font(10, bold=True)
+        ).pack(side=tk.LEFT)
 
     def _build_step1(self, parent: tk.Frame) -> None:
-        card = Card(parent, padding=14)
-        card.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        card = Card(parent, padding=16)
+        card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         b = card.body
         self._step_title(b, "1", "你的 AI 服务商")
 
         row = tk.Frame(b, bg=CARD)
-        row.pack(fill=tk.X, pady=(10, 0))
+        row.pack(fill=tk.X, pady=(12, 0))
+
+        tk.Label(
+            row, text="服务商", bg=CARD, fg=TEXT_DIM, font=font(8),
+        ).pack(anchor=tk.W, pady=(0, 5))
 
         self.upstream_name = tk.StringVar(value="DeepSeek")
         combo = ttk.Combobox(
@@ -345,10 +357,12 @@ class LauncherApp:
         )
         self.upstream_entry = tk.Entry(
             row, textvariable=self.upstream_url, font=mono(9), state="readonly",
-            bg=BG, fg=TEXT_DIM, readonlybackground=BG, relief=tk.FLAT,
-            insertbackground=TEXT, disabledbackground=BG, disabledforeground=TEXT_FAINT,
+            bg=INPUT, fg=TEXT_DIM, readonlybackground=INPUT, relief=tk.FLAT,
+            insertbackground=TEXT, disabledbackground=INPUT,
+            disabledforeground=TEXT_FAINT, highlightthickness=1,
+            highlightbackground=BORDER, highlightcolor=ACCENT_STRONG,
         )
-        self.upstream_entry.pack(fill=tk.X, pady=(8, 0), ipady=5)
+        self.upstream_entry.pack(fill=tk.X, pady=(8, 0), ipady=6)
 
         tk.Label(
             row, text="模型名称", bg=CARD, fg=TEXT_DIM, font=font(8),
@@ -358,8 +372,10 @@ class LauncherApp:
         )
         tk.Entry(
             row, textvariable=self.upstream_model, font=mono(9),
-            bg=BG, fg=TEXT, relief=tk.FLAT, insertbackground=TEXT,
-        ).pack(fill=tk.X, pady=(4, 0), ipady=5)
+            bg=INPUT, fg=TEXT, relief=tk.FLAT, insertbackground=TEXT,
+            highlightthickness=1, highlightbackground=BORDER,
+            highlightcolor=ACCENT_STRONG,
+        ).pack(fill=tk.X, pady=(4, 0), ipady=6)
 
         tk.Label(
             row, text="留空时沿用聊天软件请求的模型",
@@ -367,22 +383,26 @@ class LauncherApp:
         ).pack(anchor=tk.W, pady=(5, 0))
 
         tk.Label(
-            b, text="✓  无需在这里填写 API Key",
+            b, text="API Key 继续由聊天软件管理，启动器不会读取或保存",
             bg=CARD, fg=SUCCESS, font=font(8),
         ).pack(anchor=tk.W, pady=(9, 0))
 
     def _build_step2(self, parent: tk.Frame) -> None:
-        card = Card(parent, padding=14)
-        card.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        card = Card(parent, padding=16)
+        card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         b = card.body
-        self._step_title(b, "2", "你用什么聊天")
+        self._step_title(b, "2", "选择接入方式")
+
+        tk.Label(
+            b, text="聊天软件", bg=CARD, fg=TEXT_DIM, font=font(8),
+        ).pack(anchor=tk.W, pady=(12, 5))
 
         self.platform = tk.StringVar(value=PLATFORM_UNIVERSAL)
         combo = ttk.Combobox(
             b, textvariable=self.platform, state="readonly", values=PLATFORMS,
             style="RS.TCombobox", font=font(9),
         )
-        combo.pack(fill=tk.X, pady=(10, 0))
+        combo.pack(fill=tk.X)
         combo.bind("<<ComboboxSelected>>", self._on_platform_change)
 
         # —— 通用模式：一个大字地址 + 复制 ——
@@ -392,14 +412,15 @@ class LauncherApp:
         self.url_value = tk.StringVar(value=f"http://127.0.0.1:{self.port}/v1")
         self.url_display = tk.Entry(
             row, textvariable=self.url_value, state="readonly",
-            font=mono(10, bold=True), justify=tk.CENTER,
-            bg=BG, fg=ACCENT, readonlybackground=BG, relief=tk.FLAT,
-            insertbackground=TEXT,
+            font=mono(9, bold=True), justify=tk.LEFT,
+            bg=INPUT, fg=ACCENT_DARK, readonlybackground=INPUT, relief=tk.FLAT,
+            insertbackground=TEXT, highlightthickness=1,
+            highlightbackground=BORDER, highlightcolor=ACCENT_STRONG,
         )
-        self.url_display.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8)
+        self.url_display.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=7)
         self.copy_btn = PillButton(
             row, "复制", command=self._copy_url, width=74, height=36,
-            fill=BORDER, hover=ACCENT_DARK, font_=font(9, bold=True),
+            fill=TEXT_DIM, hover=TEXT, font_=font(9, bold=True),
         )
         self.copy_btn.pack(side=tk.RIGHT, padx=(10, 0))
         tk.Label(
@@ -420,16 +441,16 @@ class LauncherApp:
         ).pack(side=tk.LEFT, padx=(10, 0))
 
     def _build_step3(self) -> None:
-        card = Card(self.root, padding=16)
-        card.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+        card = Card(self.root, padding=18)
+        card.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 12))
         b = card.body
-        self._step_title(b, "3", "开着它，然后像平常一样聊天")
+        self._step_title(b, "3", "启动并保持运行")
 
         row = tk.Frame(b, bg=CARD)
         row.pack(fill=tk.X, pady=(12, 0))
 
         self.toggle_btn = PillButton(
-            row, "▶  启动", command=self._toggle, width=132, height=40,
+            row, "启动整理", command=self._toggle, width=136, height=40,
         )
         self.toggle_btn.pack(side=tk.LEFT)
 
@@ -447,31 +468,31 @@ class LauncherApp:
 
         # —— 主角：省了多少 ——
         hero = tk.Frame(b, bg=CARD)
-        hero.pack(fill=tk.X, pady=(14, 0))
+        hero.pack(fill=tk.X, pady=(16, 0))
 
         self.big_var = tk.StringVar(value="—")
         self.big_label = tk.Label(
             hero, textvariable=self.big_var, bg=CARD, fg=TEXT_FAINT,
-            font=mono(24, bold=True),
+            font=mono(22, bold=True),
         )
-        self.big_label.pack()
+        self.big_label.pack(anchor=tk.W)
 
         self.big_sub = tk.StringVar(value="启动后，这里会显示每次对话少发了多少内容")
         tk.Label(
             hero, textvariable=self.big_sub, bg=CARD, fg=TEXT_DIM, font=font(9),
-        ).pack(pady=(6, 0))
+        ).pack(anchor=tk.W, pady=(5, 0))
 
         self.bar = SavingsBar(hero, width=560, height=58, bg=CARD)
-        self.bar.pack(pady=(14, 0))
+        self.bar.pack(anchor=tk.W, pady=(14, 0))
 
         self.total_var = tk.StringVar(value="")
         tk.Label(
             b, textvariable=self.total_var, bg=CARD, fg=TEXT_FAINT, font=font(8),
-        ).pack(pady=(14, 0))
+        ).pack(anchor=tk.W, pady=(12, 0))
 
     def _build_log(self) -> None:
-        card = Card(self.root, padding=10)
-        card.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 16))
+        card = Card(self.root, padding=12)
+        card.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 20))
         wrap = card.body
 
         title_row = tk.Frame(wrap, bg=CARD)
@@ -489,7 +510,7 @@ class LauncherApp:
         log_body.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(
-            log_body, height=3, wrap=tk.WORD, font=mono(8), state=tk.DISABLED,
+            log_body, height=2, wrap=tk.WORD, font=mono(8), state=tk.DISABLED,
             bg=CARD, fg=TEXT_DIM, relief=tk.FLAT, borderwidth=0,
             insertbackground=TEXT, highlightthickness=0,
         )
@@ -510,7 +531,7 @@ class LauncherApp:
         preset = UPSTREAM_PRESETS[name]
         if name == "自定义…":
             self.upstream_entry.configure(
-                state=tk.NORMAL, fg=TEXT, bg=BG, readonlybackground=BG,
+                state=tk.NORMAL, fg=TEXT, bg=INPUT, readonlybackground=INPUT,
             )
             self.upstream_url.set("")
         else:
@@ -531,7 +552,7 @@ class LauncherApp:
     def _copy_url(self) -> None:
         self.root.clipboard_clear()
         self.root.clipboard_append(self.url_value.get())
-        self.copy_btn.configure_text("已复制 ✓")
+        self.copy_btn.configure_text("已复制")
         self.root.after(1400, lambda: self.copy_btn.configure_text("复制"))
         self._log("地址已复制到剪贴板", "ok")
 
@@ -603,8 +624,8 @@ class LauncherApp:
     def _on_started(self) -> None:
         self.status_var.set(f"运行中 · 127.0.0.1:{self.port}")
         self._set_dot(SUCCESS)
-        self.toggle_btn.configure_text("■  停止")
-        self.toggle_btn.configure_fill(BORDER, ACCENT_DARK)
+        self.toggle_btn.configure_text("停止整理")
+        self.toggle_btn.configure_fill(TEXT_DIM, TEXT)
         self.toggle_btn.set_enabled(True)
         self._log("代理已启动，现在可以正常聊天了", "ok")
         self.big_sub.set("正常聊天就行，数字会自己动")
@@ -612,7 +633,7 @@ class LauncherApp:
     def _on_start_failed(self, why: str) -> None:
         self.status_var.set("未启动")
         self._set_dot(TEXT_FAINT)
-        self.toggle_btn.configure_text("▶  启动")
+        self.toggle_btn.configure_text("启动整理")
         self.toggle_btn.configure_fill(ACCENT_STRONG, ACCENT)
         self.toggle_btn.set_enabled(True)
         self._log(f"启动失败：{why}", "error")
@@ -637,7 +658,7 @@ class LauncherApp:
             self.proc = None
         self.status_var.set("未启动")
         self._set_dot(TEXT_FAINT)
-        self.toggle_btn.configure_text("▶  启动")
+        self.toggle_btn.configure_text("启动整理")
         self.toggle_btn.configure_fill(ACCENT_STRONG, ACCENT)
         self.toggle_btn.set_enabled(True)
         if not quiet:
@@ -688,7 +709,7 @@ class LauncherApp:
         if self.status_var.get().startswith("运行中"):
             self.status_var.set("未启动")
             self._set_dot(TEXT_FAINT)
-            self.toggle_btn.configure_text("▶  启动")
+            self.toggle_btn.configure_text("启动整理")
             self.toggle_btn.configure_fill(ACCENT_STRONG, ACCENT)
             self.toggle_btn.set_enabled(True)
             self.big_sub.set("启动后，这里会显示每次对话少发了多少内容")
