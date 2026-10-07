@@ -189,6 +189,13 @@ class InstallerApp:
             messagebox.showwarning("目录不存在", f"目录不存在:\n{pet_dir}")
             return
 
+        if _find_proxy_exe() is None:
+            messagebox.showerror(
+                "缺少代理程序",
+                "安装器旁没有 roleplay-slim-proxy.exe，未修改任何桌宠文件。",
+            )
+            return
+
         self._install_running = True
         self.install_btn.configure(state=tk.DISABLED, text="⏳ 安装中...")
 
@@ -210,6 +217,9 @@ class InstallerApp:
 
     def _install(self, pet_dir: Path) -> None:
         log = self._log
+        proxy_src = _find_proxy_exe()
+        if proxy_src is None:
+            raise RuntimeError("代理程序在安装开始前消失，未修改桌宠文件")
 
         log("=" * 50, tag="info")
         log("[1/5] 查找关键文件...", tag="bold")
@@ -283,15 +293,8 @@ class InstallerApp:
         write_stop_script(config_dir, PROXY_PORT)
         log(f"  config.toml", tag="ok")
 
-        proxy_src = _find_proxy_exe()
-        if proxy_src:
-            try:
-                shutil.copy2(proxy_src, config_dir / _PROXY_EXE_NAME)
-                log(f"  {_PROXY_EXE_NAME}", tag="ok")
-            except OSError as e:
-                log(f"  复制代理失败: {e}", tag="warn")
-        else:
-            log(f"  代理程序未找到，请手动放入: {config_dir}", tag="warn")
+        shutil.copy2(proxy_src, config_dir / _PROXY_EXE_NAME)
+        log(f"  {_PROXY_EXE_NAME}", tag="ok")
 
         log("")
         log("[5/5] 创建启动脚本...", tag="bold")

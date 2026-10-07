@@ -64,6 +64,25 @@ def test_gui_installers_write_the_identity_checked_stop_script(
     assert "write_stop_script(config_dir, PROXY_PORT)" in source
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "integrations/pet-installer/install_gui.py",
+        "integrations/pet-installer/install_bandori_gui.py",
+        "integrations/pet-installer/install_cyrene_gui.py",
+    ],
+)
+def test_gui_installers_require_the_proxy_before_starting(
+    relative_path: str,
+) -> None:
+    source = (ROOT / relative_path).read_text(encoding="utf-8")
+    validation = source[source.index("def _start_install") :]
+    validation = validation[: validation.index("self._install_running = True")]
+
+    assert "_find_proxy_exe()" in validation
+    assert "showerror" in validation
+
+
 def test_uninstaller_does_not_run_an_untrusted_or_missing_stop_script(
     tmp_path: Path,
 ) -> None:
@@ -94,6 +113,18 @@ def test_mutsumi_launcher_never_embeds_the_api_key() -> None:
     assert "{api_key}" not in module.LAUNCH_PROXY_BAT
     assert "UPSTREAM_API_KEY=" not in module.LAUNCH_PROXY_BAT
     assert "launch_proxy.ps1" in module.LAUNCH_PROXY_BAT
+
+
+def test_mutsumi_gui_requires_a_key_before_mutating_files() -> None:
+    source = (ROOT / "integrations/pet-installer/install_gui.py").read_text(
+        encoding="utf-8"
+    )
+    validation = source[source.index("api_key = self.api_var.get().strip()") :]
+    validation = validation[: validation.index("# Disable UI during install")]
+
+    assert "showwarning" in validation
+    assert "return" in validation
+    assert "askyesno" not in validation
 
 
 def test_installer_build_bundles_security_helpers(tmp_path: Path) -> None:

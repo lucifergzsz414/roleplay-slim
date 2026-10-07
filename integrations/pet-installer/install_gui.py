@@ -299,14 +299,19 @@ class InstallerApp:
 
         api_key = self.api_var.get().strip()
         if not api_key:
-            result = messagebox.askyesno(
+            messagebox.showwarning(
                 "API Key 为空",
                 "未填入 DeepSeek API Key。\n\n"
-                "没有 API Key 代理无法工作。\n"
-                "要继续安装吗？（之后可以手动修改配置）",
+                "请填写后再开始安装；API Key 会使用 Windows DPAPI 加密保存。",
             )
-            if not result:
-                return
+            return
+
+        if _find_proxy_exe() is None:
+            messagebox.showerror(
+                "缺少代理程序",
+                "安装器旁没有 roleplay-slim-proxy.exe，未修改任何桌宠文件。",
+            )
+            return
 
         # Disable UI during install
         self._install_running = True
@@ -340,6 +345,9 @@ class InstallerApp:
         """Core install logic — mirrors installer/install.py:main() but with
         GUI logging and no interactive prompts."""
         log = self._log  # shorthand
+        proxy_src = _find_proxy_exe()
+        if proxy_src is None:
+            raise RuntimeError("代理程序在安装开始前消失，未修改桌宠文件")
 
         # --- 1. Locate key files ---
         log("=" * 50, tag="info")
@@ -453,16 +461,9 @@ class InstallerApp:
         log(f"  ✓ config.toml", tag="ok")
 
         # --- 7. Copy proxy exe ---
-        proxy_src = _find_proxy_exe()
-        if proxy_src:
-            proxy_dst = config_dir / _PROXY_EXE_NAME
-            try:
-                shutil.copy2(proxy_src, proxy_dst)
-                log(f"  ✓ {_PROXY_EXE_NAME}", tag="ok")
-            except OSError as e:
-                log(f"  ⚠ 复制代理失败: {e}", tag="warn")
-        else:
-            log(f"  ⚠ 代理程序未找到，请手动放入: {config_dir}", tag="warn")
+        proxy_dst = config_dir / _PROXY_EXE_NAME
+        shutil.copy2(proxy_src, proxy_dst)
+        log(f"  ✓ {_PROXY_EXE_NAME}", tag="ok")
 
         # --- 8. Write launcher scripts ---
         log("")
