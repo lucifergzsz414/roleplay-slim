@@ -1,8 +1,11 @@
 """Rough token accounting for before/after comparisons.
 
 Uses tiktoken when it's installed (accurate for OpenAI-family tokenizers,
-a reasonable proxy for DeepSeek/most others); falls back to a char/4
-estimate otherwise so the library has no hard dependency on it.
+a reasonable proxy for DeepSeek/most others). Without it, ASCII text is
+estimated at roughly four characters per token while non-ASCII code points
+are counted individually. The latter is intentionally conservative for CJK
+roleplay text, which the old all-text ``char/4`` fallback severely
+underestimated.
 """
 from __future__ import annotations
 
@@ -23,7 +26,9 @@ def estimate_tokens(text: str) -> int:
         return 0
     if _ENC is not None:
         return len(_ENC.encode(text))
-    return max(1, len(text) // 4)
+    ascii_chars = sum(char.isascii() for char in text)
+    non_ascii_chars = len(text) - ascii_chars
+    return max(1, (ascii_chars + 3) // 4 + non_ascii_chars)
 
 
 def _text_of(content) -> str:
