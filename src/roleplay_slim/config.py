@@ -246,6 +246,11 @@ class StatsConfig:
 @dataclass
 class ProxyConfig:
     upstream_base_url: str = "https://api.deepseek.com/v1"
+    # Optional model rewrite for OpenAI-compatible upstreams. When blank,
+    # preserve the caller's model exactly as before. Installers can set this
+    # when the desktop app's built-in model name does not exist at the chosen
+    # provider.
+    upstream_model: str = ""
     upstream_api_key_env: str = "UPSTREAM_API_KEY"
     host: str = "127.0.0.1"
     port: int = 8791
@@ -296,7 +301,7 @@ class ProxyConfig:
         compressor = CompressorConfig.from_dict(data)
         stats = StatsConfig.from_dict(data)
         known = {
-            "upstream_base_url", "upstream_api_key_env", "host", "port",
+            "upstream_base_url", "upstream_model", "upstream_api_key_env", "host", "port",
             "client_auth_token_env", "client_auth_tokens_extra",
             "anthropic_upstream_base_url", "anthropic_keep_recent_turns",
         }

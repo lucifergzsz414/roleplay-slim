@@ -38,15 +38,17 @@ else:
 sys.path.insert(0, str(_bundle_dir / "installer"))
 
 from install import (  # noqa: E402
-    CONFIG_TOML,
     LAUNCH_PET_BAT,
     LAUNCH_PROXY_BAT,
+    PROVIDER_PRESETS,
     PROXY_PORT,
     find_level0,
     find_metadata,
+    normalize_upstream_base_url,
     patch_file,
     patch_registry_url,
     read_api_key_from_registry,
+    render_proxy_config,
     write_dpapi_credential,
     write_stop_script,
 )
@@ -109,16 +111,8 @@ class InstallerApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("若叶睦桌宠 · 上下文优化代理 安装工具")
-        self.root.geometry("640x500")
-        self.root.minsize(560, 420)
-
-        # Center on screen
-        self.root.update_idletasks()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        w = self.root.winfo_reqwidth()
-        h = self.root.winfo_reqheight()
-        self.root.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
+        self.root.geometry("700x700")
+        self.root.minsize(620, 620)
 
         self._install_running = False
         self._log_queue: list[str] = []
@@ -126,6 +120,14 @@ class InstallerApp:
 
         self._build_ui()
         self._initial_log()
+
+        # Center only after widgets have established the real requested size.
+        self.root.update_idletasks()
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        w = self.root.winfo_width()
+        h = self.root.winfo_height()
+        self.root.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2)}")
 
     # ------------------------------------------------------------------
     # UI construction
@@ -142,7 +144,7 @@ class InstallerApp:
 
         subtitle = ttk.Label(
             self.root,
-            text="让 AI 记忆更聪明，同时节省 DeepSeek API 费用",
+            text="让 AI 记忆更聪明，并自由选择 OpenAI 兼容服务",
             font=("Microsoft YaHei UI", 9),
         )
         subtitle.pack(pady=(0, 14))
@@ -158,32 +160,71 @@ class InstallerApp:
         browse_btn = ttk.Button(dir_frame, text="浏览...", command=self._browse_dir)
         browse_btn.pack(side=tk.RIGHT)
 
-        # -- API key --
-        api_frame = ttk.LabelFrame(self.root, text="② DeepSeek API Key", padding=10)
+        # -- Provider and credentials --
+        api_frame = ttk.LabelFrame(self.root, text="② 模型服务", padding=10)
         api_frame.pack(fill=tk.X, padx=16, pady=(0, 10))
+
+        api_frame.columnconfigure(1, weight=1)
+        ttk.Label(api_frame, text="服务商").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        self.provider_var = tk.StringVar(value="DeepSeek")
+        self.provider_combo = ttk.Combobox(
+            api_frame,
+            textvariable=self.provider_var,
+            values=tuple(PROVIDER_PRESETS),
+            state="readonly",
+        )
+        self.provider_combo.grid(row=0, column=1, columnspan=2, sticky=tk.EW)
+        self.provider_combo.bind("<<ComboboxSelected>>", self._on_provider_change)
+
+        default_provider = PROVIDER_PRESETS["DeepSeek"]
+        self.base_url_var = tk.StringVar(value=default_provider["base_url"])
+        ttk.Label(api_frame, text="API 地址").grid(
+            row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(8, 0)
+        )
+        ttk.Entry(
+            api_frame,
+            textvariable=self.base_url_var,
+            font=("Consolas", 9),
+        ).grid(row=1, column=1, columnspan=2, sticky=tk.EW, pady=(8, 0))
+
+        self.model_var = tk.StringVar(value=default_provider["model"])
+        ttk.Label(api_frame, text="模型名称").grid(
+            row=2, column=0, sticky=tk.W, padx=(0, 10), pady=(8, 0)
+        )
+        ttk.Entry(
+            api_frame,
+            textvariable=self.model_var,
+            font=("Consolas", 9),
+        ).grid(row=2, column=1, columnspan=2, sticky=tk.EW, pady=(8, 0))
 
         self.api_var = tk.StringVar(value=read_api_key_from_registry() or "")
         self._show_key = tk.BooleanVar(value=False)
-
-        api_row = ttk.Frame(api_frame)
-        api_row.pack(fill=tk.X)
-
-        self.api_entry = ttk.Entry(api_row, textvariable=self.api_var, font=("Consolas", 9))
-        self.api_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+        ttk.Label(api_frame, text="API Key").grid(
+            row=3, column=0, sticky=tk.W, padx=(0, 10), pady=(8, 0)
+        )
+        self.api_entry = ttk.Entry(
+            api_frame,
+            textvariable=self.api_var,
+            font=("Consolas", 9),
+        )
+        self.api_entry.grid(row=3, column=1, sticky=tk.EW, pady=(8, 0))
 
         self._toggle_btn = ttk.Button(
-            api_row, text="👁", width=3, command=self._toggle_api_visibility
+            api_frame, text="👁", width=3, command=self._toggle_api_visibility
         )
-        self._toggle_btn.pack(side=tk.RIGHT)
+        self._toggle_btn.grid(row=3, column=2, padx=(8, 0), pady=(8, 0))
         self._apply_api_mask()
 
         api_hint = ttk.Label(
             api_frame,
-            text="已自动从注册表读取。如为空，请手动填入（sk-...）",
+            text="DeepSeek 会尝试读取桌宠原有 Key；切换服务商后请填写对应 Key。模型名称留空时沿用桌宠请求。",
             font=("Microsoft YaHei UI", 8),
             foreground="#888",
+            wraplength=630,
         )
-        api_hint.pack(anchor=tk.W, pady=(4, 0))
+        api_hint.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(6, 0))
+
+        self._active_provider = "DeepSeek"
 
         # -- Progress log --
         log_frame = ttk.LabelFrame(self.root, text="③ 安装进度", padding=10)
@@ -281,6 +322,16 @@ class InstallerApp:
             self.api_entry.configure(show="*")
             self._toggle_btn.configure(text="👁")
 
+    def _on_provider_change(self, _event=None) -> None:
+        """Apply the selected preset without reusing another provider's key."""
+        provider = self.provider_var.get()
+        preset = PROVIDER_PRESETS[provider]
+        if provider != self._active_provider:
+            self.api_var.set("")
+        self.base_url_var.set(preset["base_url"])
+        self.model_var.set(preset["model"])
+        self._active_provider = provider
+
     def _start_install(self) -> None:
         """Validate inputs, then launch the install in a background thread."""
         if self._install_running:
@@ -301,10 +352,17 @@ class InstallerApp:
         if not api_key:
             messagebox.showwarning(
                 "API Key 为空",
-                "未填入 DeepSeek API Key。\n\n"
+                "未填入所选服务商的 API Key。\n\n"
                 "请填写后再开始安装；API Key 会使用 Windows DPAPI 加密保存。",
             )
             return
+
+        try:
+            upstream_base_url = normalize_upstream_base_url(self.base_url_var.get())
+        except ValueError as exc:
+            messagebox.showwarning("API 地址无效", str(exc))
+            return
+        upstream_model = self.model_var.get().strip()
 
         if _find_proxy_exe() is None:
             messagebox.showerror(
@@ -319,15 +377,21 @@ class InstallerApp:
 
         thread = threading.Thread(
             target=self._run_install,
-            args=(pet_path, api_key),
+            args=(pet_path, api_key, upstream_base_url, upstream_model),
             daemon=True,
         )
         thread.start()
 
-    def _run_install(self, pet_dir: Path, api_key: str) -> None:
+    def _run_install(
+        self,
+        pet_dir: Path,
+        api_key: str,
+        upstream_base_url: str,
+        upstream_model: str,
+    ) -> None:
         """Execute the full install pipeline. Runs on a background thread."""
         try:
-            self._install(pet_dir, api_key)
+            self._install(pet_dir, api_key, upstream_base_url, upstream_model)
         except Exception as exc:
             self._log(f"", tag="")
             self._log(f"✕ 安装失败: {exc}", tag="error")
@@ -341,7 +405,13 @@ class InstallerApp:
         self._install_running = False
         self.install_btn.configure(state=tk.NORMAL, text="▶  重新安装")
 
-    def _install(self, pet_dir: Path, api_key: str) -> None:
+    def _install(
+        self,
+        pet_dir: Path,
+        api_key: str,
+        upstream_base_url: str,
+        upstream_model: str,
+    ) -> None:
         """Core install logic — mirrors installer/install.py:main() but with
         GUI logging and no interactive prompts."""
         log = self._log  # shorthand
@@ -454,11 +524,16 @@ class InstallerApp:
         config_dir.mkdir(exist_ok=True)
         config_path = config_dir / "config.toml"
         config_path.write_text(
-            CONFIG_TOML.format(port=PROXY_PORT),
+            render_proxy_config(PROXY_PORT, upstream_base_url, upstream_model),
             encoding="utf-8",
         )
         write_stop_script(config_dir, PROXY_PORT)
         log(f"  ✓ config.toml", tag="ok")
+        log(f"  ✓ 上游: {upstream_base_url}", tag="info")
+        log(
+            f"  ✓ 模型: {upstream_model or '沿用桌宠请求'}",
+            tag="info",
+        )
 
         # --- 7. Copy proxy exe ---
         proxy_dst = config_dir / _PROXY_EXE_NAME

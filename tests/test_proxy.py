@@ -107,6 +107,28 @@ def test_chat_completions_sends_compressed_messages_upstream():
     assert footer_count == 1
     # fewer messages reached upstream than were sent in (something got compressed)
     assert len(sent_messages) < len(_sample_body()["messages"])
+    # A blank override remains fully backwards-compatible.
+    assert captured["body"]["model"] == "test-model"
+
+
+def test_chat_completions_uses_configured_upstream_model():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    config = ProxyConfig(
+        upstream_model="qwen3.6-plus",
+        compressor=CompressorConfig(keep_recent_turns=1),
+        stats=StatsConfig(persist=False),
+    )
+    client = _make_client(handler, config)
+
+    response = client.post("/v1/chat/completions", json=_sample_body())
+
+    assert response.status_code == 200
+    assert captured["body"]["model"] == "qwen3.6-plus"
 
 
 def test_chat_completions_updates_stats():

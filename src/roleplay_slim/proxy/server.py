@@ -504,6 +504,9 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                 status_code=500,
             )
 
+        if config.upstream_model:
+            body["model"] = config.upstream_model
+
         _req_model = body.get("model")
         entry = stats.record(messages, compressed, model=_req_model if isinstance(_req_model, str) else None)
         pct = (entry["saved"] / entry["tokens_before"] * 100) if entry["tokens_before"] else 0.0
