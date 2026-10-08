@@ -19,26 +19,31 @@ from tkinter import ttk
 # ---------------------------------------------------------------------------
 # Palette — neutral surfaces with one functional blue accent
 # ---------------------------------------------------------------------------
-BG = "#F3F6FA"
+BG = "#F4F7FB"
 CARD = "#FFFFFF"
-BANNER = "#FFFFFF"
+BANNER = "#0F172A"
+BANNER_PANEL = "#1E293B"
+BANNER_TEXT = "#FFFFFF"
+BANNER_DIM = "#CBD5E1"
+BANNER_SUCCESS = "#A7F3D0"
 INPUT = "#F7F9FC"
-BORDER = "#DCE3EC"
-BORDER_SOFT = "#DCE3EC"
+BORDER = "#D9E2EE"
+BORDER_SOFT = "#E4EAF2"
+PANEL = "#F8FAFC"
 
-TEXT = "#172033"
-TEXT_DIM = "#526174"
-TEXT_FAINT = "#667085"
+TEXT = "#0F172A"
+TEXT_DIM = "#475569"
+TEXT_FAINT = "#64748B"
 
 ACCENT = "#3B82F6"
 ACCENT_STRONG = "#2563EB"
 ACCENT_DARK = "#1D4ED8"
-ACCENT_SOFT = "#EAF2FF"
+ACCENT_SOFT = "#EFF6FF"
 
-SUCCESS = "#16865C"
-SUCCESS_SOFT = "#EAF7F1"
-WARN = "#9A6700"
-DANGER = "#C43D4B"
+SUCCESS = "#047857"
+SUCCESS_SOFT = "#ECFDF5"
+WARN = "#B45309"
+DANGER = "#B91C1C"
 
 FONT = "Microsoft YaHei UI"
 MONO = "Consolas"

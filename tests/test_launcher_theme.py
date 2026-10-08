@@ -11,11 +11,14 @@ LAUNCHER_DIR = Path(__file__).resolve().parents[1] / "integrations" / "launcher"
 ASSETS_DIR = LAUNCHER_DIR / "assets"
 sys.path.insert(0, str(LAUNCHER_DIR))
 
+import launcher_gui  # noqa: E402
 from launcher_gui import (  # noqa: E402
     PLATFORM_CYRENE,
     UPSTREAM_PRESETS,
     LauncherApp,
+    _calculate_window_size,
     _render_config,
+    _use_stacked_layout,
     _validate_upstream_url,
 )
 from theme import (  # noqa: E402
@@ -24,6 +27,7 @@ from theme import (  # noqa: E402
     BG,
     CARD,
     INPUT,
+    PANEL,
     SUCCESS_SOFT,
     TEXT,
     round_rect_points,
@@ -52,14 +56,15 @@ def test_round_rect_radius_is_clamped_for_small_controls() -> None:
     assert points[3] == 0
 
 
-def test_launcher_theme_uses_the_reviewed_light_palette() -> None:
-    assert BG == "#F3F6FA"
+def test_launcher_theme_uses_the_reviewed_desktop_palette() -> None:
+    assert BG == "#F4F7FB"
     assert CARD == "#FFFFFF"
     assert INPUT == "#F7F9FC"
-    assert TEXT == "#172033"
+    assert PANEL == "#F8FAFC"
+    assert TEXT == "#0F172A"
     assert ACCENT_STRONG == "#2563EB"
-    assert ACCENT_SOFT == "#EAF2FF"
-    assert SUCCESS_SOFT == "#EAF7F1"
+    assert ACCENT_SOFT == "#EFF6FF"
+    assert SUCCESS_SOFT == "#ECFDF5"
 
 
 def test_launcher_icon_assets_cover_header_and_windows_sizes() -> None:
@@ -76,6 +81,64 @@ def test_launcher_icon_assets_cover_header_and_windows_sizes() -> None:
             (16, 16), (20, 20), (24, 24), (32, 32), (40, 40),
             (48, 48), (64, 64), (128, 128), (256, 256),
         }.issubset(windows_icon.info["sizes"])
+
+
+def test_window_icon_keeps_the_multisize_ico_when_available(monkeypatch) -> None:
+    calls = []
+    branded_image = object()
+
+    class FakeRoot:
+        def iconbitmap(self, *, default: str) -> None:
+            calls.append(("bitmap", Path(default).name))
+
+        def iconphoto(self, default: bool, image: object) -> None:
+            calls.append(("photo", default, image))
+
+    monkeypatch.setattr(launcher_gui, "_bundle_dir", LAUNCHER_DIR)
+    monkeypatch.setattr(launcher_gui.tk, "PhotoImage", lambda *, file: branded_image)
+
+    app = object.__new__(LauncherApp)
+    app.root = FakeRoot()
+    app._icon_img = None
+    app._set_window_icon()
+
+    assert app._icon_img is branded_image
+    assert ("bitmap", "app.ico") in calls
+    assert not any(call[0] == "photo" for call in calls)
+
+
+def test_window_icon_falls_back_to_the_branded_png(monkeypatch) -> None:
+    calls = []
+    branded_image = object()
+
+    class FakeRoot:
+        def iconbitmap(self, *, default: str) -> None:
+            raise launcher_gui.tk.TclError(default)
+
+        def iconphoto(self, default: bool, image: object) -> None:
+            calls.append((default, image))
+
+    monkeypatch.setattr(launcher_gui, "_bundle_dir", LAUNCHER_DIR)
+    monkeypatch.setattr(launcher_gui.tk, "PhotoImage", lambda *, file: branded_image)
+
+    app = object.__new__(LauncherApp)
+    app.root = FakeRoot()
+    app._icon_img = None
+    app._set_window_icon()
+
+    assert calls == [(True, branded_image)]
+
+
+def test_window_size_stays_inside_small_logical_screens() -> None:
+    assert _calculate_window_size(1112, 774, 1280, 720) == (1112, 662)
+    assert _calculate_window_size(1112, 774, 1024, 768) == (942, 706)
+
+
+def test_layout_stacks_from_the_actual_available_width() -> None:
+    assert _use_stacked_layout(920)
+    assert _use_stacked_layout(1024)
+    assert not _use_stacked_layout(1112)
+    assert not _use_stacked_layout(1707)
 
 
 def test_patch_error_survives_deferred_tk_callback(monkeypatch) -> None:

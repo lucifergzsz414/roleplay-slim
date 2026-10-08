@@ -95,9 +95,12 @@ LAUNCHER_ZIP_NAME = "roleplay-slim启动器.zip"
 LAUNCHER_README_SRC = ROOT / "使用说明_启动器.txt"
 LAUNCHER_ASSETS = ROOT.parent / "launcher" / "assets"
 LAUNCHER_ICON = LAUNCHER_ASSETS / "app.ico"
-# The header PNG is read at runtime with tk.PhotoImage, so it has to be
-# bundled — a frozen exe can only see what shipped inside it.
-LAUNCHER_EXTRA_DATA = [(LAUNCHER_ASSETS / "app_header.png", "assets")]
+# Tk reads both resources at runtime.  The ICO keeps Windows titlebar/taskbar
+# rendering crisp at every size; the PNG is used inside the branded header.
+LAUNCHER_EXTRA_DATA = [
+    (LAUNCHER_ASSETS / "app.ico", "assets"),
+    (LAUNCHER_ASSETS / "app_header.png", "assets"),
+]
 
 
 def pyinstaller_available() -> bool:

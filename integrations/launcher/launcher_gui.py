@@ -37,11 +37,17 @@ from theme import (
     ACCENT_SOFT,
     ACCENT_STRONG,
     BANNER,
+    BANNER_DIM,
+    BANNER_PANEL,
+    BANNER_SUCCESS,
+    BANNER_TEXT,
     BG,
     BORDER,
+    BORDER_SOFT,
     CARD,
     DANGER,
     INPUT,
+    PANEL,
     SUCCESS,
     SUCCESS_SOFT,
     TEXT,
@@ -110,6 +116,24 @@ PLATFORM_MUTSUMI = "若叶睦桌宠"
 PLATFORM_BANDORI = "邦多利桌宠 BandoriPet"
 PLATFORM_CYRENE = "Cyrene-Agent"
 PLATFORMS = [PLATFORM_UNIVERSAL, PLATFORM_MUTSUMI, PLATFORM_BANDORI, PLATFORM_CYRENE]
+
+
+def _calculate_window_size(
+    requested_width: int,
+    requested_height: int,
+    screen_width: int,
+    screen_height: int,
+) -> tuple[int, int]:
+    """Fit the launcher inside the logical desktop at any DPI scale."""
+    return (
+        min(requested_width, int(screen_width * 0.92)),
+        min(requested_height, int(screen_height * 0.92)),
+    )
+
+
+def _use_stacked_layout(available_width: int) -> bool:
+    """Stack cards when the real viewport cannot fit both columns."""
+    return available_width < 1040
 
 CONFIG_TOML = """# roleplay-slim 启动器自动生成，不需要手动改
 [proxy]
@@ -215,7 +239,7 @@ class LauncherApp:
         self._build_ui()
         self._center()
         self._enable_light_titlebar()
-        self._log("准备好了，选好上面的两项就可以点「启动整理」。", "info")
+        self._log("准备就绪。完成左侧连接设置后，点击「开始整理」。", "info")
         # Keep watching the port for the window's whole life, not only after
         # we started the proxy ourselves. Otherwise a GUI restarted while a
         # proxy is still running shows "未启动" while the port is in fact
@@ -227,11 +251,13 @@ class LauncherApp:
     def _set_window_icon(self) -> None:
         """.ico works for the taskbar; the in-window header uses the PNG
         because Tk's PhotoImage can't scale and can't read .ico."""
+        ico_applied = False
         for name in ("app.ico", "assets/app.ico"):
             p = _bundle_dir / name
             if p.is_file():
                 try:
                     self.root.iconbitmap(default=str(p))
+                    ico_applied = True
                     break
                 except tk.TclError:
                     pass
@@ -240,6 +266,8 @@ class LauncherApp:
             if p.is_file():
                 try:
                     self._icon_img = tk.PhotoImage(file=str(p))
+                    if not ico_applied:
+                        self.root.iconphoto(True, self._icon_img)
                     break
                 except tk.TclError:
                     pass
@@ -252,11 +280,15 @@ class LauncherApp:
         varies with the user's DPI scaling, so a fixed number was wrong on
         some machines and right on others."""
         self.root.update_idletasks()
-        w = max(self.root.winfo_reqwidth(), 760)
-        h = self.root.winfo_reqheight()
+        requested_width = max(
+            self.root.winfo_reqwidth(), getattr(self, "_preferred_width", 920)
+        )
+        requested_height = self.root.winfo_reqheight()
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        h = min(h, int(sh * 0.92))  # never taller than the screen
-        self.root.minsize(min(720, w), min(620, h))
+        w, h = _calculate_window_size(
+            requested_width, requested_height, sw, sh
+        )
+        self.root.minsize(min(860, w), min(620, h))
         self.root.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 3)}")
 
     def _enable_light_titlebar(self) -> None:
@@ -279,75 +311,177 @@ class LauncherApp:
     # ---------------------------------------------------------------- UI ---
     def _build_ui(self) -> None:
         self._build_header()
-        setup = tk.Frame(self.root, bg=BG)
-        setup.pack(fill=tk.X, padx=24, pady=(0, 12))
-        setup.grid_columnconfigure(0, weight=1, uniform="setup")
-        setup.grid_columnconfigure(1, weight=1, uniform="setup")
-        self._build_step1(setup)
-        self._build_step2(setup)
-        self._build_step3()
-        self._build_log()
+        self._preferred_width = min(
+            1112, int(self.root.winfo_screenwidth() * 0.92)
+        )
+        shell = tk.Frame(self.root, bg=BG)
+        shell.pack(fill=tk.BOTH, expand=True)
+
+        visible_height = max(
+            430, min(680, int(self.root.winfo_screenheight() * 0.72))
+        )
+        self.content_canvas = tk.Canvas(
+            shell, bg=BG, borderwidth=0, highlightthickness=0,
+            height=visible_height,
+        )
+        self.content_scroll = ttk.Scrollbar(
+            shell, command=self.content_canvas.yview,
+            style="RS.Vertical.TScrollbar",
+        )
+        self.content_canvas.configure(yscrollcommand=self.content_scroll.set)
+        self.content_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.content_scroll.pack(
+            side=tk.RIGHT, fill=tk.Y, padx=(0, 8), pady=(0, 24)
+        )
+
+        workspace = tk.Frame(self.content_canvas, bg=BG)
+        self._workspace_window = self.content_canvas.create_window(
+            (0, 0), window=workspace, anchor=tk.NW
+        )
+        workspace.bind("<Configure>", self._update_scroll_region)
+        self.content_canvas.bind("<Configure>", self._resize_workspace)
+        self.root.bind("<MouseWheel>", self._scroll_workspace)
+
+        workspace.grid_columnconfigure(0, weight=1)
+        self._workspace = workspace
+        self._stacked_layout: bool | None = None
+
+        self.setup_card = Card(workspace, padding=22)
+        self._build_step1(self.setup_card.body)
+        self._divider(self.setup_card.body, pady=18)
+        self._build_step2(self.setup_card.body)
+
+        self.activity_card = Card(workspace, padding=22)
+        self._build_step3(self.activity_card.body)
+        self._divider(self.activity_card.body, pady=16)
+        self._build_log(self.activity_card.body)
+        self._apply_workspace_layout(self._preferred_width)
         self._on_platform_change()
+
+    def _update_scroll_region(self, _evt=None) -> None:
+        bbox = self.content_canvas.bbox("all")
+        if bbox is not None:
+            self.content_canvas.configure(scrollregion=bbox)
+            content_height = bbox[3] - bbox[1]
+            if content_height > self.content_canvas.winfo_height() + 1:
+                if not self.content_scroll.winfo_manager():
+                    self.content_scroll.pack(
+                        side=tk.RIGHT, fill=tk.Y,
+                        padx=(0, 8), pady=(0, 24),
+                    )
+            else:
+                self.content_canvas.yview_moveto(0)
+                self.content_scroll.pack_forget()
+
+    def _resize_workspace(self, event) -> None:
+        self.content_canvas.itemconfigure(self._workspace_window, width=event.width)
+        self._apply_workspace_layout(event.width)
+        self.root.after_idle(self._update_scroll_region)
+
+    def _apply_workspace_layout(self, available_width: int) -> None:
+        stacked = _use_stacked_layout(available_width)
+        if stacked == self._stacked_layout:
+            return
+        self._stacked_layout = stacked
+        self.setup_card.grid_forget()
+        self.activity_card.grid_forget()
+
+        if stacked:
+            self._workspace.grid_columnconfigure(0, weight=1, uniform="")
+            self._workspace.grid_columnconfigure(1, weight=0, uniform="")
+            self.setup_card.grid(
+                row=0, column=0, sticky="nsew", padx=28, pady=(0, 8)
+            )
+            self.activity_card.grid(
+                row=1, column=0, sticky="nsew", padx=28, pady=(8, 24)
+            )
+        else:
+            self._workspace.grid_columnconfigure(0, weight=5, uniform="workspace")
+            self._workspace.grid_columnconfigure(1, weight=6, uniform="workspace")
+            self.setup_card.grid(
+                row=0, column=0, sticky="nsew", padx=(28, 8), pady=(0, 24)
+            )
+            self.activity_card.grid(
+                row=0, column=1, sticky="nsew", padx=(8, 28), pady=(0, 24)
+            )
+
+        if available_width < 900:
+            self.header_context_label.pack_forget()
+        elif not self.header_context_label.winfo_manager():
+            self.header_context_label.pack(side=tk.RIGHT, padx=(0, 12))
+
+    def _scroll_workspace(self, event) -> None:
+        if self.content_canvas.bbox("all") is None:
+            return
+        self.content_canvas.yview_scroll(int(-event.delta / 120), "units")
 
     def _build_header(self) -> None:
         head = tk.Frame(self.root, bg=BANNER)
-        head.pack(fill=tk.X, padx=24, pady=(20, 16), ipady=8)
+        head.pack(fill=tk.X, padx=28, pady=(22, 18), ipady=4)
 
         if self._icon_img is not None:
             tk.Label(head, image=self._icon_img, bg=BANNER).pack(
-                side=tk.LEFT, padx=(0, 12)
+                side=tk.LEFT, padx=(0, 14)
             )
         else:
             mark = tk.Canvas(
-                head, width=38, height=38, bg=BANNER,
+                head, width=44, height=44, bg=BANNER,
                 highlightthickness=0, bd=0,
             )
-            mark.create_rectangle(1, 1, 37, 37, fill=ACCENT_STRONG, outline="")
-            mark.create_line(10, 12, 28, 12, fill="#FFFFFF", width=3)
-            mark.create_line(10, 19, 25, 19, fill="#FFFFFF", width=3)
-            mark.create_line(10, 26, 21, 26, fill="#FFFFFF", width=3)
-            mark.pack(side=tk.LEFT, padx=(0, 12))
+            mark.create_rectangle(1, 1, 43, 43, fill=ACCENT_STRONG, outline="")
+            mark.create_line(11, 13, 32, 13, fill="#FFFFFF", width=3)
+            mark.create_line(11, 22, 28, 22, fill="#FFFFFF", width=3)
+            mark.create_line(11, 31, 23, 31, fill="#FFFFFF", width=3)
+            mark.pack(side=tk.LEFT, padx=(0, 14))
 
         titles = tk.Frame(head, bg=BANNER)
         titles.pack(side=tk.LEFT, anchor=tk.W)
         tk.Label(
             titles, text="roleplay-slim",
-            bg=BANNER, fg=TEXT, font=font(16, bold=True),
+            bg=BANNER, fg=BANNER_TEXT, font=font(17, bold=True),
         ).pack(anchor=tk.W)
         tk.Label(
             titles,
-            text="让长对话保持自然、稳定",
-            bg=BANNER, fg=TEXT_DIM, font=font(9),
-        ).pack(anchor=tk.W, pady=(3, 0))
+            text="长对话整理器",
+            bg=BANNER, fg=BANNER_DIM, font=font(9),
+        ).pack(anchor=tk.W, pady=(2, 0))
 
-        badge = tk.Label(
-            head, text="本地处理 · 不保存 API Key", bg=SUCCESS_SOFT, fg=SUCCESS,
-            font=font(8, bold=True), padx=12, pady=7,
+        meta = tk.Frame(head, bg=BANNER)
+        meta.pack(side=tk.RIGHT, anchor=tk.E)
+        tk.Label(
+            meta, text="本地运行", bg=BANNER_PANEL, fg=BANNER_SUCCESS,
+            font=font(8, bold=True), padx=11, pady=6,
+        ).pack(side=tk.RIGHT)
+        self.header_context_label = tk.Label(
+            meta, text="API Key 始终由聊天软件管理",
+            bg=BANNER, fg=BANNER_DIM, font=font(8),
         )
-        badge.pack(side=tk.RIGHT, padx=(12, 0))
+        self.header_context_label.pack(side=tk.RIGHT, padx=(0, 12))
 
-    def _step_title(self, parent: tk.Frame, num: str, text: str) -> None:
+    def _section_title(self, parent: tk.Frame, text: str, hint: str) -> None:
         row = tk.Frame(parent, bg=CARD)
         row.pack(anchor=tk.W, fill=tk.X)
         tk.Label(
-            row, text=f"0{num}", bg=CARD, fg=ACCENT_STRONG,
-            font=mono(9, bold=True),
-        ).pack(side=tk.LEFT, padx=(0, 10))
+            row, text=text, bg=CARD, fg=TEXT, font=font(11, bold=True)
+        ).pack(anchor=tk.W)
         tk.Label(
-            row, text=text, bg=CARD, fg=TEXT, font=font(10, bold=True)
-        ).pack(side=tk.LEFT)
+            row, text=hint, bg=CARD, fg=TEXT_FAINT, font=font(8)
+        ).pack(anchor=tk.W, pady=(3, 0))
+
+    def _divider(self, parent: tk.Frame, pady: int = 14) -> None:
+        tk.Frame(parent, bg=BORDER_SOFT, height=1).pack(
+            fill=tk.X, pady=(pady, pady)
+        )
 
     def _build_step1(self, parent: tk.Frame) -> None:
-        card = Card(parent, padding=16)
-        card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        b = card.body
-        self._step_title(b, "1", "你的 AI 服务商")
+        b = parent
+        self._section_title(b, "AI 服务", "选择实际处理对话的模型服务")
 
         row = tk.Frame(b, bg=CARD)
-        row.pack(fill=tk.X, pady=(12, 0))
+        row.pack(fill=tk.X, pady=(14, 0))
 
         tk.Label(
-            row, text="服务商", bg=CARD, fg=TEXT_DIM, font=font(8),
+            row, text="服务商", bg=CARD, fg=TEXT_DIM, font=font(8, bold=True),
         ).pack(anchor=tk.W, pady=(0, 5))
 
         self.upstream_name = tk.StringVar(value="DeepSeek")
@@ -369,10 +503,10 @@ class LauncherApp:
             disabledforeground=TEXT_FAINT, highlightthickness=1,
             highlightbackground=BORDER, highlightcolor=ACCENT_STRONG,
         )
-        self.upstream_entry.pack(fill=tk.X, pady=(8, 0), ipady=6)
+        self.upstream_entry.pack(fill=tk.X, pady=(8, 0), ipady=7)
 
         tk.Label(
-            row, text="模型名称", bg=CARD, fg=TEXT_DIM, font=font(8),
+            row, text="模型名称", bg=CARD, fg=TEXT_DIM, font=font(8, bold=True),
         ).pack(anchor=tk.W, pady=(9, 0))
         self.upstream_model = tk.StringVar(
             value=UPSTREAM_PRESETS["DeepSeek"]["model"]
@@ -382,27 +516,20 @@ class LauncherApp:
             bg=INPUT, fg=TEXT, relief=tk.FLAT, insertbackground=TEXT,
             highlightthickness=1, highlightbackground=BORDER,
             highlightcolor=ACCENT_STRONG,
-        ).pack(fill=tk.X, pady=(4, 0), ipady=6)
+        ).pack(fill=tk.X, pady=(5, 0), ipady=7)
 
         tk.Label(
             row, text="留空时沿用聊天软件请求的模型",
             bg=CARD, fg=TEXT_FAINT, font=font(8),
         ).pack(anchor=tk.W, pady=(5, 0))
 
-        tk.Label(
-            b, text="API Key 继续由聊天软件管理，启动器不会读取或保存",
-            bg=CARD, fg=SUCCESS, font=font(8),
-        ).pack(anchor=tk.W, pady=(9, 0))
-
     def _build_step2(self, parent: tk.Frame) -> None:
-        card = Card(parent, padding=16)
-        card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        b = card.body
-        self._step_title(b, "2", "选择接入方式")
+        b = parent
+        self._section_title(b, "接入应用", "把整理后的请求交给你的聊天软件")
 
         tk.Label(
-            b, text="聊天软件", bg=CARD, fg=TEXT_DIM, font=font(8),
-        ).pack(anchor=tk.W, pady=(12, 5))
+            b, text="聊天软件", bg=CARD, fg=TEXT_DIM, font=font(8, bold=True),
+        ).pack(anchor=tk.W, pady=(14, 5))
 
         self.platform = tk.StringVar(value=PLATFORM_UNIVERSAL)
         combo = ttk.Combobox(
@@ -426,21 +553,21 @@ class LauncherApp:
         )
         self.url_display.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=7)
         self.copy_btn = PillButton(
-            row, "复制", command=self._copy_url, width=74, height=36,
+            row, "复制地址", command=self._copy_url, width=92, height=38,
             fill=ACCENT_SOFT, hover=BORDER, fg=ACCENT_DARK,
             font_=font(9, bold=True),
         )
         self.copy_btn.pack(side=tk.RIGHT, padx=(10, 0))
         tk.Label(
-            self.url_frame, text="复制到聊天软件的「API 地址」栏",
+            self.url_frame, text="粘贴到聊天软件的「API 地址」栏",
             bg=CARD, fg=TEXT_DIM, font=font(8),
         ).pack(anchor=tk.W, pady=(8, 0))
 
         # —— 已适配应用：一键改配置 ——
         self.patch_frame = tk.Frame(b, bg=CARD)
         self.patch_btn = PillButton(
-            self.patch_frame, "一键改好它的配置", command=self._one_click_patch,
-            width=170, height=36, font_=font(9, bold=True),
+            self.patch_frame, "自动配置所选应用", command=self._one_click_patch,
+            width=182, height=38, font_=font(9, bold=True),
         )
         self.patch_btn.pack(side=tk.LEFT)
         tk.Label(
@@ -448,17 +575,26 @@ class LauncherApp:
             bg=CARD, fg=TEXT_FAINT, font=font(8),
         ).pack(side=tk.LEFT, padx=(10, 0))
 
-    def _build_step3(self) -> None:
-        card = Card(self.root, padding=18)
-        card.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 12))
-        b = card.body
-        self._step_title(b, "3", "启动并保持运行")
+        self.security_note = tk.Frame(b, bg=SUCCESS_SOFT)
+        tk.Label(
+            self.security_note, text="隐私保护", bg=SUCCESS_SOFT, fg=SUCCESS,
+            font=font(8, bold=True),
+        ).pack(anchor=tk.W, padx=12, pady=(9, 2))
+        tk.Label(
+            self.security_note,
+            text="启动器不会读取或保存 API Key",
+            bg=SUCCESS_SOFT, fg=TEXT_DIM, font=font(8),
+        ).pack(anchor=tk.W, padx=12, pady=(0, 9))
+
+    def _build_step3(self, parent: tk.Frame) -> None:
+        b = parent
+        self._section_title(b, "运行状态", "启动后保持这个窗口打开即可")
 
         row = tk.Frame(b, bg=CARD)
-        row.pack(fill=tk.X, pady=(12, 0))
+        row.pack(fill=tk.X, pady=(16, 0))
 
         self.toggle_btn = PillButton(
-            row, "启动整理", command=self._toggle, width=136, height=40,
+            row, "开始整理", command=self._toggle, width=148, height=44,
         )
         self.toggle_btn.pack(side=tk.LEFT)
 
@@ -475,33 +611,33 @@ class LauncherApp:
         ).pack(side=tk.LEFT, padx=(7, 0))
 
         # —— 主角：省了多少 ——
-        hero = tk.Frame(b, bg=CARD)
-        hero.pack(fill=tk.X, pady=(16, 0))
+        hero = tk.Frame(b, bg=PANEL)
+        hero.pack(fill=tk.X, pady=(18, 0), ipady=16)
+        hero_inner = tk.Frame(hero, bg=PANEL)
+        hero_inner.pack(fill=tk.X, padx=16)
 
         self.big_var = tk.StringVar(value="—")
         self.big_label = tk.Label(
-            hero, textvariable=self.big_var, bg=CARD, fg=TEXT_FAINT,
-            font=mono(22, bold=True),
+            hero_inner, textvariable=self.big_var, bg=PANEL, fg=TEXT_FAINT,
+            font=mono(25, bold=True),
         )
         self.big_label.pack(anchor=tk.W)
 
         self.big_sub = tk.StringVar(value="启动后，这里会显示每次对话少发了多少内容")
         tk.Label(
-            hero, textvariable=self.big_sub, bg=CARD, fg=TEXT_DIM, font=font(9),
+            hero_inner, textvariable=self.big_sub, bg=PANEL, fg=TEXT_DIM, font=font(9),
         ).pack(anchor=tk.W, pady=(5, 0))
 
-        self.bar = SavingsBar(hero, width=560, height=58, bg=CARD)
+        self.bar = SavingsBar(hero_inner, width=390, height=58, bg=PANEL)
         self.bar.pack(anchor=tk.W, pady=(14, 0))
 
         self.total_var = tk.StringVar(value="")
         tk.Label(
             b, textvariable=self.total_var, bg=CARD, fg=TEXT_FAINT, font=font(8),
-        ).pack(anchor=tk.W, pady=(12, 0))
+        ).pack(anchor=tk.W, pady=(10, 0))
 
-    def _build_log(self) -> None:
-        card = Card(self.root, padding=12)
-        card.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 20))
-        wrap = card.body
+    def _build_log(self, parent: tk.Frame) -> None:
+        wrap = parent
 
         title_row = tk.Frame(wrap, bg=CARD)
         title_row.pack(fill=tk.X, pady=(0, 6))
@@ -518,9 +654,10 @@ class LauncherApp:
         log_body.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(
-            log_body, height=2, wrap=tk.WORD, font=mono(8), state=tk.DISABLED,
-            bg=CARD, fg=TEXT_DIM, relief=tk.FLAT, borderwidth=0,
-            insertbackground=TEXT, highlightthickness=0,
+            log_body, height=5, wrap=tk.WORD, font=mono(8), state=tk.DISABLED,
+            bg=PANEL, fg=TEXT_DIM, relief=tk.FLAT, borderwidth=0,
+            insertbackground=TEXT, highlightthickness=1,
+            highlightbackground=BORDER_SOFT, padx=10, pady=8,
         )
         scroll = ttk.Scrollbar(log_body, command=self.log_text.yview,
                                style="RS.Vertical.TScrollbar")
@@ -550,12 +687,14 @@ class LauncherApp:
         self.upstream_model.set(preset["model"])
 
     def _on_platform_change(self, _evt=None) -> None:
+        self.security_note.pack_forget()
         if self.platform.get() == PLATFORM_UNIVERSAL:
             self.patch_frame.pack_forget()
             self.url_frame.pack(fill=tk.X, pady=(12, 0))
         else:
             self.url_frame.pack_forget()
             self.patch_frame.pack(fill=tk.X, pady=(12, 0))
+        self.security_note.pack(fill=tk.X, pady=(14, 0))
 
     def _copy_url(self) -> None:
         self.root.clipboard_clear()
@@ -641,7 +780,7 @@ class LauncherApp:
     def _on_start_failed(self, why: str) -> None:
         self.status_var.set("未启动")
         self._set_dot(TEXT_FAINT)
-        self.toggle_btn.configure_text("启动整理")
+        self.toggle_btn.configure_text("开始整理")
         self.toggle_btn.configure_fill(ACCENT_STRONG, ACCENT)
         self.toggle_btn.set_enabled(True)
         self._log(f"启动失败：{why}", "error")
@@ -666,7 +805,7 @@ class LauncherApp:
             self.proc = None
         self.status_var.set("未启动")
         self._set_dot(TEXT_FAINT)
-        self.toggle_btn.configure_text("启动整理")
+        self.toggle_btn.configure_text("开始整理")
         self.toggle_btn.configure_fill(ACCENT_STRONG, ACCENT)
         self.toggle_btn.set_enabled(True)
         if not quiet:
@@ -717,7 +856,7 @@ class LauncherApp:
         if self.status_var.get().startswith("运行中"):
             self.status_var.set("未启动")
             self._set_dot(TEXT_FAINT)
-            self.toggle_btn.configure_text("启动整理")
+            self.toggle_btn.configure_text("开始整理")
             self.toggle_btn.configure_fill(ACCENT_STRONG, ACCENT)
             self.toggle_btn.set_enabled(True)
             self.big_sub.set("启动后，这里会显示每次对话少发了多少内容")
