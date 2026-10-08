@@ -205,6 +205,8 @@ def test_bandori_builds_bundle_brand_assets(
     result = getattr(build, builder_name)()
 
     assert result == build.DIST / getattr(build, exe_name)
+    assert build.LAUNCHER_ICON.is_file()
+    assert all(source.is_file() for source, _destination in build.LAUNCHER_EXTRA_DATA)
     assert captured["kwargs"]["icon"] == build.LAUNCHER_ICON
     assert captured["kwargs"]["extra_data"] == build.LAUNCHER_EXTRA_DATA
 
@@ -215,6 +217,132 @@ def test_bandori_installer_can_reveal_progress_on_short_screens() -> None:
 import install_bandori_gui
 app = install_bandori_gui.InstallerApp()
 app.root.geometry("620x520")
+app.root.update()
+before = app.scroll_body.canvas.yview()
+app._scroll_to_log()
+app.root.update()
+after = app.scroll_body.canvas.yview()
+log_top = app.log_text.winfo_rooty() - app.root.winfo_rooty()
+assert after[0] > before[0]
+assert 0 <= log_top < app.root.winfo_height()
+app.root.destroy()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=INSTALLER_DIR,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows desktop layout check")
+@pytest.mark.parametrize(
+    ("module_name", "class_name", "button_name", "width", "height"),
+    [
+        ("install_cyrene_gui", "InstallerApp", "install_btn", 620, 520),
+        ("uninstall_cyrene_gui", "UninstallerApp", "uninstall_btn", 600, 480),
+    ],
+)
+def test_cyrene_windows_use_brand_theme_and_fit_small_windows(
+    module_name: str,
+    class_name: str,
+    button_name: str,
+    width: int,
+    height: int,
+) -> None:
+    probe = f"""
+import importlib
+module = importlib.import_module({module_name!r})
+app = getattr(module, {class_name!r})()
+app.root.geometry({f'{width}x{height}'!r})
+app.root.update()
+assert app.root.cget("background") == {BG!r}
+assert app._icon_img is not None
+parent = app.log_text.master
+assert app.log_text.winfo_x() + app.log_text.winfo_width() <= parent.winfo_width()
+assert app.log_scroll.winfo_x() + app.log_scroll.winfo_width() <= parent.winfo_width()
+button = getattr(app, {button_name!r})
+button_bottom = button.winfo_rooty() - app.root.winfo_rooty() + button.winfo_height()
+assert button_bottom <= app.root.winfo_height()
+assert app.scroll_body.scrollbar.winfo_manager()
+before = app.scroll_body.canvas.yview()
+event = type("WheelEvent", (), {{"widget": app.scroll_body.canvas, "delta": -120}})()
+assert app.scroll_body.on_mousewheel(event) == "break"
+app.root.update()
+assert app.scroll_body.canvas.yview() != before
+app.root.destroy()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=INSTALLER_DIR,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("builder_name", "exe_name"),
+    [
+        ("build_cyrene_installer", "CYRENE_INSTALLER_EXE_NAME"),
+        ("build_cyrene_uninstaller", "CYRENE_UNINSTALLER_EXE_NAME"),
+    ],
+)
+def test_cyrene_builds_bundle_brand_assets(
+    monkeypatch, builder_name: str, exe_name: str
+) -> None:
+    import build
+
+    captured = {}
+
+    def fake_build(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return build.DIST / getattr(build, exe_name)
+
+    monkeypatch.setattr(build, "_build_tk_exe", fake_build)
+    result = getattr(build, builder_name)()
+
+    assert result == build.DIST / getattr(build, exe_name)
+    assert captured["kwargs"]["icon"] == build.LAUNCHER_ICON
+    assert captured["kwargs"]["extra_data"] == build.LAUNCHER_EXTRA_DATA
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows desktop layout check")
+def test_cyrene_installer_can_reveal_progress_on_short_screens() -> None:
+    probe = """
+import install_cyrene_gui
+app = install_cyrene_gui.InstallerApp()
+app.root.geometry("620x520")
+app.root.update()
+before = app.scroll_body.canvas.yview()
+app._scroll_to_log()
+app.root.update()
+after = app.scroll_body.canvas.yview()
+log_top = app.log_text.winfo_rooty() - app.root.winfo_rooty()
+assert after[0] > before[0]
+assert 0 <= log_top < app.root.winfo_height()
+app.root.destroy()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=INSTALLER_DIR,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows desktop layout check")
+def test_cyrene_uninstaller_can_reveal_progress_on_short_screens() -> None:
+    probe = """
+import uninstall_cyrene_gui
+app = uninstall_cyrene_gui.UninstallerApp()
+app.root.geometry("600x480")
 app.root.update()
 before = app.scroll_body.canvas.yview()
 app._scroll_to_log()

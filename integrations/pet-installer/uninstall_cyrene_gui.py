@@ -26,6 +26,21 @@ else:
 
 sys.path.insert(0, str(_bundle_dir / "installer_cyrene"))
 
+from installer_theme import (  # noqa: E402
+    ACCENT,
+    BG,
+    CARD,
+    PANEL,
+    SUCCESS,
+    TEXT,
+    TEXT_DIM,
+    ScrollableBody,
+    apply_theme,
+    build_header,
+    center_window,
+    create_card,
+    load_brand_icon,
+)
 from patch_cyrene import uninstall_cyrene  # noqa: E402
 from safe_process import stop_installed_proxy  # noqa: E402
 
@@ -47,15 +62,8 @@ class UninstallerApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Cyrene-Agent · 卸载还原工具")
-        self.root.geometry("600x420")
-        self.root.minsize(520, 360)
-
-        self.root.update_idletasks()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        w = self.root.winfo_reqwidth()
-        h = self.root.winfo_reqheight()
-        self.root.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
+        apply_theme(self.root)
+        self._icon_img = load_brand_icon(self.root, _bundle_dir)
 
         self._running = False
         self._log_queue: list[tuple[str, str]] = []
@@ -63,56 +71,136 @@ class UninstallerApp:
 
         self._build_ui()
         self._initial_log()
+        center_window(
+            self.root,
+            preferred_width=680,
+            preferred_height=640,
+            minimum_width=600,
+            minimum_height=480,
+        )
 
     def _build_ui(self) -> None:
-        title = ttk.Label(
-            self.root, text="Cyrene-Agent · 卸载还原工具",
-            font=("Microsoft YaHei UI", 13, "bold"),
+        build_header(
+            self.root,
+            self._icon_img,
+            title="roleplay-slim",
+            subtitle="Cyrene-Agent 卸载还原工具",
+            badge="备份保留",
         )
-        title.pack(pady=(16, 2))
 
-        subtitle = ttk.Label(
-            self.root, text="把 Cyrene 恢复到安装代理之前的原始状态",
-            font=("Microsoft YaHei UI", 9),
+        self.scroll_body = ScrollableBody(self.root)
+        self.scroll_body.pack(fill=tk.BOTH, expand=True)
+        self.root.bind_all("<MouseWheel>", self.scroll_body.on_mousewheel)
+
+        dir_card = create_card(
+            self.scroll_body.body,
+            "还原位置",
+            "选择需要恢复到原始状态的 Cyrene 安装目录",
         )
-        subtitle.pack(pady=(0, 14))
-
-        dir_frame = ttk.LabelFrame(self.root, text="Cyrene 安装目录", padding=10)
-        dir_frame.pack(fill=tk.X, padx=16, pady=(0, 10))
+        dir_frame = tk.Frame(dir_card, bg=CARD)
+        dir_frame.pack(fill=tk.X)
 
         self.dir_var = tk.StringVar(value=_auto_detect_pet_dir())
-        dir_entry = ttk.Entry(dir_frame, textvariable=self.dir_var, font=("Consolas", 9))
+        dir_entry = ttk.Entry(
+            dir_frame,
+            textvariable=self.dir_var,
+            font=("Consolas", 9),
+            style="Installer.TEntry",
+        )
         dir_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
-        browse_btn = ttk.Button(dir_frame, text="浏览...", command=self._browse_dir)
+        browse_btn = ttk.Button(
+            dir_frame,
+            text="浏览目录",
+            command=self._browse_dir,
+            style="Installer.TButton",
+        )
         browse_btn.pack(side=tk.RIGHT)
 
-        log_frame = ttk.LabelFrame(self.root, text="日志", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
+        scope_card = create_card(
+            self.scroll_body.body,
+            "处理说明",
+            "执行前会再次请求确认",
+        )
+        scope_rows = (
+            ("恢复模型配置", "使用现有备份还原 model-settings.json"),
+            ("移除代理文件", "删除代理程序、配置和 Cyrene 启动脚本"),
+            ("保留恢复备份", ".roleplay-slim.bak 文件始终保留"),
+        )
+        for index, (label, value) in enumerate(scope_rows):
+            row = tk.Frame(scope_card, bg=CARD)
+            row.pack(fill=tk.X, pady=(0, 7 if index < len(scope_rows) - 1 else 0))
+            tk.Label(
+                row,
+                text=label,
+                bg=CARD,
+                fg=TEXT,
+                font=("Microsoft YaHei UI", 9, "bold"),
+                width=12,
+                anchor=tk.W,
+            ).pack(side=tk.LEFT)
+            tk.Label(
+                row,
+                text=value,
+                bg=CARD,
+                fg=TEXT_DIM,
+                font=("Microsoft YaHei UI", 9),
+                anchor=tk.W,
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        log_card = create_card(
+            self.scroll_body.body,
+            "处理日志",
+            "还原结果会在这里逐项显示",
+        )
+        log_frame = tk.Frame(log_card, bg=CARD)
+        log_frame.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(
-            log_frame, height=10, wrap=tk.WORD, font=("Consolas", 9),
-            state=tk.DISABLED, background="#1e1e1e", foreground="#d4d4d4",
-            insertbackground="#d4d4d4", relief=tk.FLAT, borderwidth=0,
+            log_frame,
+            height=7,
+            width=1,
+            wrap=tk.WORD,
+            font=("Consolas", 9),
+            state=tk.DISABLED,
+            background=PANEL,
+            foreground=TEXT_DIM,
+            insertbackground=TEXT,
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=12,
+            pady=10,
         )
-        log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
+        self.log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=self.log_scroll.set)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self.log_text.tag_configure("ok", foreground="#6a9955")
-        self.log_text.tag_configure("warn", foreground="#ce9178")
-        self.log_text.tag_configure("error", foreground="#f44747")
-        self.log_text.tag_configure("info", foreground="#569cd6")
-        self.log_text.tag_configure("bold", foreground="#dcdcaa", font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("ok", foreground=SUCCESS)
+        self.log_text.tag_configure("warn", foreground="#B45309")
+        self.log_text.tag_configure("error", foreground="#B91C1C")
+        self.log_text.tag_configure("info", foreground=ACCENT)
+        self.log_text.tag_configure(
+            "bold", foreground=TEXT, font=("Consolas", 9, "bold")
+        )
 
-        btn_frame = ttk.Frame(self.root)
-        btn_frame.pack(fill=tk.X, padx=16, pady=(0, 14))
+        btn_frame = tk.Frame(self.root, bg=BG)
+        btn_frame.pack(fill=tk.X, padx=24, pady=(4, 18))
 
-        self.uninstall_btn = ttk.Button(btn_frame, text="卸载 / 还原", command=self._start_uninstall)
+        self.uninstall_btn = ttk.Button(
+            btn_frame,
+            text="卸载并还原",
+            command=self._start_uninstall,
+            style="Installer.Danger.TButton",
+        )
         self.uninstall_btn.pack(side=tk.RIGHT, padx=(10, 0))
 
-        close_btn = ttk.Button(btn_frame, text="关闭", command=self.root.destroy)
+        close_btn = ttk.Button(
+            btn_frame,
+            text="关闭",
+            command=self.root.destroy,
+            style="Installer.TButton",
+        )
         close_btn.pack(side=tk.RIGHT)
 
     def _initial_log(self) -> None:
@@ -145,6 +233,11 @@ class UninstallerApp:
         if path:
             self.dir_var.set(path)
 
+    def _scroll_to_log(self) -> None:
+        """Reveal the progress card before a background restore starts."""
+        self.root.update_idletasks()
+        self.scroll_body.canvas.yview_moveto(1.0)
+
     def _start_uninstall(self) -> None:
         if self._running:
             return
@@ -169,7 +262,8 @@ class UninstallerApp:
             return
 
         self._running = True
-        self.uninstall_btn.configure(state=tk.DISABLED, text="⏳ 处理中...")
+        self.uninstall_btn.configure(state=tk.DISABLED, text="处理中...")
+        self._scroll_to_log()
 
         thread = threading.Thread(target=self._run_uninstall, args=(pet_path,), daemon=True)
         thread.start()
@@ -187,7 +281,7 @@ class UninstallerApp:
 
     def _uninstall_done(self) -> None:
         self._running = False
-        self.uninstall_btn.configure(state=tk.NORMAL, text="卸载 / 还原")
+        self.uninstall_btn.configure(state=tk.NORMAL, text="卸载并还原")
         messagebox.showinfo("完成", "处理完成，请查看日志确认还原结果。")
 
 

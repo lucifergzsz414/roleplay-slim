@@ -255,6 +255,7 @@ def build_cyrene_installer() -> Path:
     return _build_tk_exe(
         CYRENE_INSTALLER_SRC, "Cyrene安装器", CYRENE_INSTALLER_EXE_NAME,
         "cyrene_installer", CYRENE_DEPS, "patch_cyrene",
+        icon=LAUNCHER_ICON, extra_data=LAUNCHER_EXTRA_DATA,
     )
 
 
@@ -263,6 +264,7 @@ def build_cyrene_uninstaller() -> Path:
     return _build_tk_exe(
         CYRENE_UNINSTALLER_SRC, "Cyrene卸载还原器", CYRENE_UNINSTALLER_EXE_NAME,
         "cyrene_uninstaller", CYRENE_DEPS, "patch_cyrene",
+        icon=LAUNCHER_ICON, extra_data=LAUNCHER_EXTRA_DATA,
     )
 
 

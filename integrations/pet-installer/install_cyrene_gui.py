@@ -27,6 +27,21 @@ else:
 
 sys.path.insert(0, str(_bundle_dir / "installer_cyrene"))
 
+from installer_theme import (  # noqa: E402
+    ACCENT,
+    BG,
+    CARD,
+    PANEL,
+    SUCCESS,
+    TEXT,
+    TEXT_DIM,
+    ScrollableBody,
+    apply_theme,
+    build_header,
+    center_window,
+    create_card,
+    load_brand_icon,
+)
 from patch_cyrene import (  # noqa: E402
     BACKUP_SUFFIX,
     CONFIG_TOML,
@@ -68,15 +83,8 @@ class InstallerApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Cyrene-Agent · 上下文优化代理 安装工具")
-        self.root.geometry("640x460")
-        self.root.minsize(560, 400)
-
-        self.root.update_idletasks()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        w = self.root.winfo_reqwidth()
-        h = self.root.winfo_reqheight()
-        self.root.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
+        apply_theme(self.root)
+        self._icon_img = load_brand_icon(self.root, _bundle_dir)
 
         self._install_running = False
         self._log_queue: list[tuple[str, str]] = []
@@ -84,56 +92,136 @@ class InstallerApp:
 
         self._build_ui()
         self._initial_log()
+        center_window(
+            self.root,
+            preferred_width=700,
+            preferred_height=650,
+            minimum_width=620,
+            minimum_height=520,
+        )
 
     def _build_ui(self) -> None:
-        title = ttk.Label(
-            self.root, text="Cyrene-Agent · 上下文优化代理",
-            font=("Microsoft YaHei UI", 13, "bold"),
+        build_header(
+            self.root,
+            self._icon_img,
+            title="roleplay-slim",
+            subtitle="Cyrene-Agent 上下文优化代理安装工具",
+            badge="安全安装",
         )
-        title.pack(pady=(16, 2))
 
-        subtitle = ttk.Label(
-            self.root, text="让 AI 记忆更聪明，同时节省 DeepSeek API 费用",
-            font=("Microsoft YaHei UI", 9),
+        self.scroll_body = ScrollableBody(self.root)
+        self.scroll_body.pack(fill=tk.BOTH, expand=True)
+        self.root.bind_all("<MouseWheel>", self.scroll_body.on_mousewheel)
+
+        dir_card = create_card(
+            self.scroll_body.body,
+            "应用位置",
+            "选择包含 Cyrene.exe 的安装目录",
         )
-        subtitle.pack(pady=(0, 14))
-
-        dir_frame = ttk.LabelFrame(self.root, text="Cyrene 安装目录", padding=10)
-        dir_frame.pack(fill=tk.X, padx=16, pady=(0, 10))
+        dir_frame = tk.Frame(dir_card, bg=CARD)
+        dir_frame.pack(fill=tk.X)
 
         self.dir_var = tk.StringVar(value=_auto_detect_pet_dir())
-        dir_entry = ttk.Entry(dir_frame, textvariable=self.dir_var, font=("Consolas", 9))
+        dir_entry = ttk.Entry(
+            dir_frame,
+            textvariable=self.dir_var,
+            font=("Consolas", 9),
+            style="Installer.TEntry",
+        )
         dir_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
-        browse_btn = ttk.Button(dir_frame, text="浏览...", command=self._browse_dir)
+        browse_btn = ttk.Button(
+            dir_frame,
+            text="浏览目录",
+            command=self._browse_dir,
+            style="Installer.TButton",
+        )
         browse_btn.pack(side=tk.RIGHT)
 
-        log_frame = ttk.LabelFrame(self.root, text="安装进度", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
+        scope_card = create_card(
+            self.scroll_body.body,
+            "安装内容",
+            "只修改当前选择的 Cyrene 和本机用户配置，原配置会保留备份",
+        )
+        scope_rows = (
+            ("代理服务", f"本机 127.0.0.1:{PROXY_PORT}，不开放公网端口"),
+            ("模型配置", "将 Cyrene 请求接入上下文优化代理"),
+            ("随时还原", "保留 model-settings.json 备份，可用还原器恢复"),
+        )
+        for index, (label, value) in enumerate(scope_rows):
+            row = tk.Frame(scope_card, bg=CARD)
+            row.pack(fill=tk.X, pady=(0, 7 if index < len(scope_rows) - 1 else 0))
+            tk.Label(
+                row,
+                text=label,
+                bg=CARD,
+                fg=TEXT,
+                font=("Microsoft YaHei UI", 9, "bold"),
+                width=11,
+                anchor=tk.W,
+            ).pack(side=tk.LEFT)
+            tk.Label(
+                row,
+                text=value,
+                bg=CARD,
+                fg=TEXT_DIM,
+                font=("Microsoft YaHei UI", 9),
+                anchor=tk.W,
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        log_card = create_card(
+            self.scroll_body.body,
+            "安装进度",
+            "准备与安装结果会在这里逐项显示",
+        )
+        log_frame = tk.Frame(log_card, bg=CARD)
+        log_frame.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(
-            log_frame, height=12, wrap=tk.WORD, font=("Consolas", 9),
-            state=tk.DISABLED, background="#1e1e1e", foreground="#d4d4d4",
-            insertbackground="#d4d4d4", relief=tk.FLAT, borderwidth=0,
+            log_frame,
+            height=7,
+            width=1,
+            wrap=tk.WORD,
+            font=("Consolas", 9),
+            state=tk.DISABLED,
+            background=PANEL,
+            foreground=TEXT_DIM,
+            insertbackground=TEXT,
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=12,
+            pady=10,
         )
-        log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
+        self.log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=self.log_scroll.set)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self.log_text.tag_configure("ok", foreground="#6a9955")
-        self.log_text.tag_configure("warn", foreground="#ce9178")
-        self.log_text.tag_configure("error", foreground="#f44747")
-        self.log_text.tag_configure("info", foreground="#569cd6")
-        self.log_text.tag_configure("bold", foreground="#dcdcaa", font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("ok", foreground=SUCCESS)
+        self.log_text.tag_configure("warn", foreground="#B45309")
+        self.log_text.tag_configure("error", foreground="#B91C1C")
+        self.log_text.tag_configure("info", foreground=ACCENT)
+        self.log_text.tag_configure(
+            "bold", foreground=TEXT, font=("Consolas", 9, "bold")
+        )
 
-        btn_frame = ttk.Frame(self.root)
-        btn_frame.pack(fill=tk.X, padx=16, pady=(0, 14))
+        btn_frame = tk.Frame(self.root, bg=BG)
+        btn_frame.pack(fill=tk.X, padx=24, pady=(4, 18))
 
-        self.install_btn = ttk.Button(btn_frame, text="▶  开始安装", command=self._start_install)
+        self.install_btn = ttk.Button(
+            btn_frame,
+            text="开始安装",
+            command=self._start_install,
+            style="Installer.Primary.TButton",
+        )
         self.install_btn.pack(side=tk.RIGHT, padx=(10, 0))
 
-        close_btn = ttk.Button(btn_frame, text="关闭", command=self.root.destroy)
+        close_btn = ttk.Button(
+            btn_frame,
+            text="关闭",
+            command=self.root.destroy,
+            style="Installer.TButton",
+        )
         close_btn.pack(side=tk.RIGHT)
 
     def _initial_log(self) -> None:
@@ -170,6 +258,11 @@ class InstallerApp:
         if path:
             self.dir_var.set(path)
 
+    def _scroll_to_log(self) -> None:
+        """Reveal the progress card before a background installation starts."""
+        self.root.update_idletasks()
+        self.scroll_body.canvas.yview_moveto(1.0)
+
     def _start_install(self) -> None:
         if self._install_running:
             return
@@ -192,7 +285,8 @@ class InstallerApp:
             return
 
         self._install_running = True
-        self.install_btn.configure(state=tk.DISABLED, text="⏳ 安装中...")
+        self.install_btn.configure(state=tk.DISABLED, text="安装中...")
+        self._scroll_to_log()
 
         thread = threading.Thread(target=self._run_install, args=(pet_path,), daemon=True)
         thread.start()
@@ -208,7 +302,7 @@ class InstallerApp:
 
     def _install_done(self) -> None:
         self._install_running = False
-        self.install_btn.configure(state=tk.NORMAL, text="▶  重新安装")
+        self.install_btn.configure(state=tk.NORMAL, text="重新安装")
 
     def _install(self, pet_dir: Path) -> None:
         log = self._log
