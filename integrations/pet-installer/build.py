@@ -216,7 +216,11 @@ def _build_tk_exe(
 
 def build_installer() -> Path:
     """Build the Mutsumi GUI installer as a single-file .exe."""
-    return _build_tk_exe(INSTALLER_SRC, "安装器", INSTALLER_EXE_NAME, "installer", INSTALL_DEPS, "install")
+    return _build_tk_exe(
+        INSTALLER_SRC, "安装器", INSTALLER_EXE_NAME, "installer",
+        INSTALL_DEPS, "install", icon=LAUNCHER_ICON,
+        extra_data=LAUNCHER_EXTRA_DATA,
+    )
 
 
 def build_uninstaller() -> Path:
@@ -270,7 +274,6 @@ def build_proxy() -> Path:
     step("Building roleplay-slim-proxy.exe")
     DIST.mkdir(exist_ok=True)
 
-    output = DIST / PROXY_EXE_NAME
     workpath = DIST / "_build_proxy"
     specpath = DIST / "_build_proxy"
 

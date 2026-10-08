@@ -52,6 +52,22 @@ from install import (  # noqa: E402
     write_dpapi_credential,
     write_stop_script,
 )
+from installer_theme import (  # noqa: E402
+    ACCENT,
+    BG,
+    CARD,
+    PANEL,
+    SUCCESS,
+    TEXT,
+    TEXT_DIM,
+    TEXT_FAINT,
+    ScrollableBody,
+    apply_theme,
+    build_header,
+    center_window,
+    create_card,
+    load_brand_icon,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -111,8 +127,8 @@ class InstallerApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("若叶睦桌宠 · 上下文优化代理 安装工具")
-        self.root.geometry("700x700")
-        self.root.minsize(620, 620)
+        apply_theme(self.root)
+        self._icon_img = load_brand_icon(self.root, _bundle_dir)
 
         self._install_running = False
         self._log_queue: list[str] = []
@@ -120,150 +136,192 @@ class InstallerApp:
 
         self._build_ui()
         self._initial_log()
-
-        # Center only after widgets have established the real requested size.
-        self.root.update_idletasks()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        w = self.root.winfo_width()
-        h = self.root.winfo_height()
-        self.root.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2)}")
+        center_window(
+            self.root,
+            preferred_width=760,
+            preferred_height=740,
+            minimum_width=660,
+            minimum_height=560,
+        )
 
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         """Build all widgets."""
-        # -- Title --
-        title = ttk.Label(
+        build_header(
             self.root,
-            text="若叶睦桌宠 · 上下文优化代理",
-            font=("Microsoft YaHei UI", 13, "bold"),
+            self._icon_img,
+            title="roleplay-slim",
+            subtitle="若叶睦桌宠安装工具",
+            badge="安全安装",
         )
-        title.pack(pady=(16, 2))
 
-        subtitle = ttk.Label(
-            self.root,
-            text="让 AI 记忆更聪明，并自由选择 OpenAI 兼容服务",
-            font=("Microsoft YaHei UI", 9),
+        self.scroll_body = ScrollableBody(self.root)
+        self.scroll_body.pack(fill=tk.BOTH, expand=True)
+        self.root.bind_all("<MouseWheel>", self.scroll_body.on_mousewheel)
+
+        dir_card = create_card(
+            self.scroll_body.body,
+            "桌宠位置",
+            "选择若叶睦桌宠的安装目录",
         )
-        subtitle.pack(pady=(0, 14))
-
-        # -- Pet directory --
-        dir_frame = ttk.LabelFrame(self.root, text="① 桌宠安装目录", padding=10)
-        dir_frame.pack(fill=tk.X, padx=16, pady=(0, 10))
+        dir_frame = tk.Frame(dir_card, bg=CARD)
+        dir_frame.pack(fill=tk.X)
 
         self.dir_var = tk.StringVar(value=_auto_detect_pet_dir())
-        dir_entry = ttk.Entry(dir_frame, textvariable=self.dir_var, font=("Consolas", 9))
+        dir_entry = ttk.Entry(
+            dir_frame,
+            textvariable=self.dir_var,
+            style="Installer.TEntry",
+            font=("Consolas", 9),
+        )
         dir_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
-        browse_btn = ttk.Button(dir_frame, text="浏览...", command=self._browse_dir)
+        browse_btn = ttk.Button(
+            dir_frame,
+            text="浏览目录",
+            command=self._browse_dir,
+            style="Installer.TButton",
+        )
         browse_btn.pack(side=tk.RIGHT)
 
-        # -- Provider and credentials --
-        api_frame = ttk.LabelFrame(self.root, text="② 模型服务", padding=10)
-        api_frame.pack(fill=tk.X, padx=16, pady=(0, 10))
+        api_card = create_card(
+            self.scroll_body.body,
+            "模型服务",
+            "选择服务商并填写对应的连接信息",
+        )
+        api_frame = tk.Frame(api_card, bg=CARD)
+        api_frame.pack(fill=tk.X)
 
         api_frame.columnconfigure(1, weight=1)
-        ttk.Label(api_frame, text="服务商").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        ttk.Label(api_frame, text="服务商", style="Installer.TLabel").grid(
+            row=0, column=0, sticky=tk.W, padx=(0, 12)
+        )
         self.provider_var = tk.StringVar(value="DeepSeek")
         self.provider_combo = ttk.Combobox(
             api_frame,
             textvariable=self.provider_var,
             values=tuple(PROVIDER_PRESETS),
             state="readonly",
+            style="Installer.TCombobox",
         )
         self.provider_combo.grid(row=0, column=1, columnspan=2, sticky=tk.EW)
         self.provider_combo.bind("<<ComboboxSelected>>", self._on_provider_change)
 
         default_provider = PROVIDER_PRESETS["DeepSeek"]
         self.base_url_var = tk.StringVar(value=default_provider["base_url"])
-        ttk.Label(api_frame, text="API 地址").grid(
+        ttk.Label(api_frame, text="API 地址", style="Installer.TLabel").grid(
             row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(8, 0)
         )
         ttk.Entry(
             api_frame,
             textvariable=self.base_url_var,
             font=("Consolas", 9),
+            style="Installer.TEntry",
         ).grid(row=1, column=1, columnspan=2, sticky=tk.EW, pady=(8, 0))
 
         self.model_var = tk.StringVar(value=default_provider["model"])
-        ttk.Label(api_frame, text="模型名称").grid(
+        ttk.Label(api_frame, text="模型名称", style="Installer.TLabel").grid(
             row=2, column=0, sticky=tk.W, padx=(0, 10), pady=(8, 0)
         )
         ttk.Entry(
             api_frame,
             textvariable=self.model_var,
             font=("Consolas", 9),
+            style="Installer.TEntry",
         ).grid(row=2, column=1, columnspan=2, sticky=tk.EW, pady=(8, 0))
 
         self.api_var = tk.StringVar(value=read_api_key_from_registry() or "")
         self._show_key = tk.BooleanVar(value=False)
-        ttk.Label(api_frame, text="API Key").grid(
+        ttk.Label(api_frame, text="API Key", style="Installer.TLabel").grid(
             row=3, column=0, sticky=tk.W, padx=(0, 10), pady=(8, 0)
         )
         self.api_entry = ttk.Entry(
             api_frame,
             textvariable=self.api_var,
             font=("Consolas", 9),
+            style="Installer.TEntry",
         )
         self.api_entry.grid(row=3, column=1, sticky=tk.EW, pady=(8, 0))
 
         self._toggle_btn = ttk.Button(
-            api_frame, text="👁", width=3, command=self._toggle_api_visibility
+            api_frame,
+            text="显示",
+            width=6,
+            command=self._toggle_api_visibility,
+            style="Installer.TButton",
         )
         self._toggle_btn.grid(row=3, column=2, padx=(8, 0), pady=(8, 0))
         self._apply_api_mask()
 
-        api_hint = ttk.Label(
+        api_hint = tk.Label(
             api_frame,
             text="DeepSeek 会尝试读取桌宠原有 Key；切换服务商后请填写对应 Key。模型名称留空时沿用桌宠请求。",
             font=("Microsoft YaHei UI", 8),
-            foreground="#888",
-            wraplength=630,
+            fg=TEXT_FAINT,
+            bg=CARD,
+            wraplength=610,
+            justify=tk.LEFT,
         )
         api_hint.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(6, 0))
 
         self._active_provider = "DeepSeek"
 
-        # -- Progress log --
-        log_frame = ttk.LabelFrame(self.root, text="③ 安装进度", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
+        log_card = create_card(
+            self.scroll_body.body,
+            "安装进度",
+            "所有操作都会在这里逐项显示",
+        )
+        log_frame = tk.Frame(log_card, bg=CARD)
+        log_frame.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(
             log_frame,
-            height=10,
+            height=9,
+            width=1,
             wrap=tk.WORD,
             font=("Consolas", 9),
             state=tk.DISABLED,
-            background="#1e1e1e",
-            foreground="#d4d4d4",
-            insertbackground="#d4d4d4",
+            background=PANEL,
+            foreground=TEXT_DIM,
+            insertbackground=TEXT,
             relief=tk.FLAT,
             borderwidth=0,
+            padx=12,
+            pady=10,
         )
-        log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
+        self.log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=self.log_scroll.set)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Log colour tags
-        self.log_text.tag_configure("ok", foreground="#6a9955")
-        self.log_text.tag_configure("warn", foreground="#ce9178")
-        self.log_text.tag_configure("error", foreground="#f44747")
-        self.log_text.tag_configure("info", foreground="#569cd6")
-        self.log_text.tag_configure("bold", foreground="#dcdcaa", font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("ok", foreground=SUCCESS)
+        self.log_text.tag_configure("warn", foreground="#B45309")
+        self.log_text.tag_configure("error", foreground="#B91C1C")
+        self.log_text.tag_configure("info", foreground=ACCENT)
+        self.log_text.tag_configure(
+            "bold", foreground=TEXT, font=("Consolas", 9, "bold")
+        )
 
-        # -- Buttons --
-        btn_frame = ttk.Frame(self.root)
-        btn_frame.pack(fill=tk.X, padx=16, pady=(0, 14))
+        btn_frame = tk.Frame(self.root, bg=BG)
+        btn_frame.pack(fill=tk.X, padx=24, pady=(4, 18))
 
         self.install_btn = ttk.Button(
-            btn_frame, text="▶  开始安装", command=self._start_install
+            btn_frame,
+            text="开始安装",
+            command=self._start_install,
+            style="Installer.Primary.TButton",
         )
         self.install_btn.pack(side=tk.RIGHT, padx=(10, 0))
 
-        close_btn = ttk.Button(btn_frame, text="关闭", command=self.root.destroy)
+        close_btn = ttk.Button(
+            btn_frame,
+            text="关闭",
+            command=self.root.destroy,
+            style="Installer.TButton",
+        )
         close_btn.pack(side=tk.RIGHT)
 
     def _initial_log(self) -> None:
@@ -317,10 +375,10 @@ class InstallerApp:
     def _apply_api_mask(self) -> None:
         if self._show_key.get():
             self.api_entry.configure(show="")
-            self._toggle_btn.configure(text="🙈")
+            self._toggle_btn.configure(text="隐藏")
         else:
             self.api_entry.configure(show="*")
-            self._toggle_btn.configure(text="👁")
+            self._toggle_btn.configure(text="显示")
 
     def _on_provider_change(self, _event=None) -> None:
         """Apply the selected preset without reusing another provider's key."""
@@ -373,7 +431,7 @@ class InstallerApp:
 
         # Disable UI during install
         self._install_running = True
-        self.install_btn.configure(state=tk.DISABLED, text="⏳ 安装中...")
+        self.install_btn.configure(state=tk.DISABLED, text="正在安装…")
 
         thread = threading.Thread(
             target=self._run_install,
@@ -393,9 +451,9 @@ class InstallerApp:
         try:
             self._install(pet_dir, api_key, upstream_base_url, upstream_model)
         except Exception as exc:
-            self._log(f"", tag="")
+            self._log("", tag="")
             self._log(f"✕ 安装失败: {exc}", tag="error")
-            self._log(f"请将上面的日志发送给开发者。", tag="warn")
+            self._log("请将上面的日志发送给开发者。", tag="warn")
         finally:
             # Re-enable UI on the main thread
             self.root.after(0, self._install_done)
@@ -403,7 +461,7 @@ class InstallerApp:
     def _install_done(self) -> None:
         """Re-enable the install button."""
         self._install_running = False
-        self.install_btn.configure(state=tk.NORMAL, text="▶  重新安装")
+        self.install_btn.configure(state=tk.NORMAL, text="重新安装")
 
     def _install(
         self,
@@ -439,7 +497,7 @@ class InstallerApp:
             metadata_path = find_metadata(pet_dir)
             log(f"  ✓ metadata: {metadata_path}", tag="ok")
         except FileNotFoundError:
-            log(f"  ⚠ global-metadata.dat 未找到，跳过 metadata patch", tag="warn")
+            log("  ⚠ global-metadata.dat 未找到，跳过 metadata patch", tag="warn")
             metadata_path = None
 
         # --- 2. Backup ---
@@ -449,18 +507,18 @@ class InstallerApp:
         backup_l0 = pet_dir / "level0.bak"
         if not backup_l0.exists():
             shutil.copy2(level0_path, backup_l0)
-            log(f"  ✓ level0 → level0.bak", tag="ok")
+            log("  ✓ level0 → level0.bak", tag="ok")
         else:
-            log(f"  - 备份已存在，跳过", tag="info")
+            log("  - 备份已存在，跳过", tag="info")
 
         backup_meta = None
         if metadata_path:
             backup_meta = metadata_path.parent / "global-metadata.dat.bak"
             if not backup_meta.exists():
                 shutil.copy2(metadata_path, backup_meta)
-                log(f"  ✓ metadata → global-metadata.dat.bak", tag="ok")
+                log("  ✓ metadata → global-metadata.dat.bak", tag="ok")
             else:
-                log(f"  - metadata 备份已存在，跳过", tag="info")
+                log("  - metadata 备份已存在，跳过", tag="info")
 
         # --- 3. API key status ---
         log("")
@@ -468,19 +526,19 @@ class InstallerApp:
         if api_key:
             log("  ✓ 已获取并准备加密保存", tag="ok")
         else:
-            log(f"  ⚠ 未提供 API Key，启动脚本中需手动填写", tag="warn")
+            log("  ⚠ 未提供 API Key，启动脚本中需手动填写", tag="warn")
 
         # --- 4. Patch level0 ---
         log("")
-        log(f"[4/7] Patch level0 (API 端点 → 代理)...", tag="bold")
+        log("[4/7] Patch level0 (API 端点 → 代理)...", tag="bold")
         try:
             was_patched = patch_file(level0_path, check_prefix=True, log=log)
             if was_patched:
                 log(f"  ✓ level0 已指向 127.0.0.1:{PROXY_PORT}", tag="ok")
         except ValueError:
-            log(f"  ✕ level0 patch 失败！正在从备份恢复...", tag="error")
+            log("  ✕ level0 patch 失败！正在从备份恢复...", tag="error")
             shutil.copy2(backup_l0, level0_path)
-            log(f"  - 已从备份恢复", tag="info")
+            log("  - 已从备份恢复", tag="info")
             self.root.after(0, lambda: messagebox.showerror(
                 "Patch 失败",
                 "level0 文件中未找到 DeepSeek URL。\n"
@@ -492,15 +550,15 @@ class InstallerApp:
         # --- 5. Patch metadata ---
         if metadata_path:
             log("")
-            log(f"[5/7] Patch global-metadata.dat...", tag="bold")
+            log("[5/7] Patch global-metadata.dat...", tag="bold")
             try:
                 was_patched = patch_file(metadata_path, check_prefix=False, log=log)
                 if was_patched:
                     log(f"  ✓ metadata 已指向 127.0.0.1:{PROXY_PORT}", tag="ok")
             except ValueError:
-                log(f"  ✕ metadata patch 失败！正在从备份恢复...", tag="error")
+                log("  ✕ metadata patch 失败！正在从备份恢复...", tag="error")
                 shutil.copy2(backup_meta, metadata_path)
-                log(f"  - 已从备份恢复", tag="info")
+                log("  - 已从备份恢复", tag="info")
                 self.root.after(0, lambda: messagebox.showerror(
                     "Metadata Patch 失败",
                     "global-metadata.dat 中未找到 DeepSeek URL。\n"
@@ -510,11 +568,11 @@ class InstallerApp:
                 return
         else:
             log("")
-            log(f"[5/7] Patch metadata — 跳过（未找到）", tag="info")
+            log("[5/7] Patch metadata — 跳过（未找到）", tag="info")
 
         # --- 5.5. Patch dynamic registry URL override (newer builds only) ---
         log("")
-        log(f"[5.5/7] Patch 注册表动态 URL 覆盖设置（如果存在）...", tag="bold")
+        log("[5.5/7] Patch 注册表动态 URL 覆盖设置（如果存在）...", tag="bold")
         patch_registry_url(PROXY_PORT, log=log)
 
         # --- 6. Write proxy config ---
@@ -528,7 +586,7 @@ class InstallerApp:
             encoding="utf-8",
         )
         write_stop_script(config_dir, PROXY_PORT)
-        log(f"  ✓ config.toml", tag="ok")
+        log("  ✓ config.toml", tag="ok")
         log(f"  ✓ 上游: {upstream_base_url}", tag="info")
         log(
             f"  ✓ 模型: {upstream_model or '沿用桌宠请求'}",
@@ -547,24 +605,24 @@ class InstallerApp:
         proxy_bat = pet_dir / "启动代理.bat"
         write_dpapi_credential(config_dir, api_key)
         proxy_bat.write_text(LAUNCH_PROXY_BAT, encoding="gbk")
-        log(f"  ✓ 启动代理.bat", tag="ok")
+        log("  ✓ 启动代理.bat", tag="ok")
 
         pet_bat = pet_dir / "若叶睦.bat"
         pet_bat.write_text(
             LAUNCH_PET_BAT.replace("{port}", str(PROXY_PORT)),
             encoding="gbk",  # matches the default (no chcp) console code page
         )
-        log(f"  ✓ 若叶睦.bat", tag="ok")
+        log("  ✓ 若叶睦.bat", tag="ok")
 
         # --- Done ---
         log("")
         log("=" * 50, tag="info")
         log("  安装完成！", tag="ok")
         log("")
-        log(f"  以后双击「若叶睦.bat」启动即可", tag="bold")
+        log("  以后双击「若叶睦.bat」启动即可", tag="bold")
         log(f"  位置: {pet_bat}", tag="info")
         log("")
-        log(f"  备份文件:", tag="info")
+        log("  备份文件:", tag="info")
         log(f"    {backup_l0}", tag="info")
         if backup_meta:
             log(f"    {backup_meta}", tag="info")
@@ -572,8 +630,8 @@ class InstallerApp:
 
         self.root.after(0, lambda: messagebox.showinfo(
             "安装完成",
-            f"安装成功！\n\n以后双击「若叶睦.bat」启动桌宠即可。\n"
-            f"代理会随桌宠自动启停，无需手动管理。",
+            "安装成功！\n\n以后双击「若叶睦.bat」启动桌宠即可。\n"
+            "代理会随桌宠自动启停，无需手动管理。",
         ))
 
 
