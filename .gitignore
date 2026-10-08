@@ -19,7 +19,7 @@ readme-polish-round3-log.md
 _r.py
 _read_img.py
 
-# Private pet-distribution readmes — build.py --*-zip requires them to be
-# present locally but treats them as private distribution content, not part
-# of the public repo (see the CYRENE_README_SRC / BANDORI_README_SRC notes).
+# Private pet-distribution readmes stay local. The universal launcher's guide
+# is public release content and is explicitly tracked below.
 使用说明*.txt
+!integrations/pet-installer/使用说明_启动器.txt

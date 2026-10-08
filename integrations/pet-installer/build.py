@@ -26,6 +26,7 @@ Requirements:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -358,6 +359,14 @@ def package_zip(zip_name: str, files: list[Path], readme: Path | None = None) ->
     return zip_path
 
 
+def write_sha256_sidecar(archive: Path) -> Path:
+    """Write a standard sha256sum-compatible checksum beside an archive."""
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    checksum_path = archive.with_name(f"{archive.name}.sha256")
+    checksum_path.write_text(f"{digest} *{archive.name}\n", encoding="utf-8")
+    return checksum_path
+
+
 def main() -> None:
     installer_only = "--installer-only" in sys.argv
     uninstaller_only = "--uninstaller-only" in sys.argv
@@ -442,7 +451,13 @@ def main() -> None:
         if not LAUNCHER_README_SRC.is_file():
             print(f"[X] {LAUNCHER_README_SRC.name} is missing — write it before packaging.")
             sys.exit(1)
-        package_zip(LAUNCHER_ZIP_NAME, [launcher, proxy], LAUNCHER_README_SRC)
+        archive = package_zip(
+            LAUNCHER_ZIP_NAME,
+            [launcher, proxy],
+            LAUNCHER_README_SRC,
+        )
+        checksum_path = write_sha256_sidecar(archive)
+        print(f"  [OK] SHA-256 -> {checksum_path}")
 
     if do_zip:
         if not installer:
