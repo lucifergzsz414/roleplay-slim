@@ -21,10 +21,10 @@ roleplay-slim-proxy.exe
 
 请先完整解压压缩包，不要直接在压缩软件预览窗口中运行。
 
-发布页还会提供 roleplay-slim启动器.zip.sha256。它记录安装包的 SHA-256，
+发布页还会提供 roleplay-slim-windows-x64.zip.sha256。它记录安装包的 SHA-256，
 用于确认下载过程中文件没有损坏或被替换。在 PowerShell 中进入下载目录后运行：
 
-    (Get-FileHash .\roleplay-slim启动器.zip -Algorithm SHA256).Hash.ToLower()
+    (Get-FileHash .\roleplay-slim-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
 
 输出应与 .sha256 文件开头的 64 位字符完全一致。校验文件不能替代 Windows
 代码签名，因此仍请只从项目官方发布页下载安装包。
