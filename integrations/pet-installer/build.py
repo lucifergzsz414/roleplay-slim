@@ -225,7 +225,11 @@ def build_installer() -> Path:
 
 def build_uninstaller() -> Path:
     """Build the Mutsumi GUI uninstaller as a single-file .exe."""
-    return _build_tk_exe(UNINSTALLER_SRC, "卸载还原器", UNINSTALLER_EXE_NAME, "uninstaller", INSTALL_DEPS, "install")
+    return _build_tk_exe(
+        UNINSTALLER_SRC, "卸载还原器", UNINSTALLER_EXE_NAME, "uninstaller",
+        INSTALL_DEPS, "install", icon=LAUNCHER_ICON,
+        extra_data=LAUNCHER_EXTRA_DATA,
+    )
 
 
 def build_bandori_installer() -> Path:

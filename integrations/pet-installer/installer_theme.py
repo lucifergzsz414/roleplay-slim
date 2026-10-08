@@ -21,6 +21,8 @@ TEXT_FAINT = "#64748B"
 ACCENT = "#2563EB"
 ACCENT_HOVER = "#1D4ED8"
 SUCCESS = "#047857"
+DANGER = "#B42318"
+DANGER_HOVER = "#912018"
 
 FONT = "Microsoft YaHei UI"
 MONO = "Consolas"
@@ -97,6 +99,19 @@ def apply_theme(root: tk.Tk) -> ttk.Style:
         "Installer.Primary.TButton",
         background=[("active", ACCENT_HOVER), ("disabled", "#94A3B8")],
         foreground=[("disabled", "#E2E8F0")],
+    )
+    style.configure(
+        "Installer.Danger.TButton",
+        background=DANGER,
+        foreground="#FFFFFF",
+        bordercolor=DANGER,
+        padding=(18, 9),
+        font=(FONT, 9, "bold"),
+    )
+    style.map(
+        "Installer.Danger.TButton",
+        background=[("active", DANGER_HOVER), ("disabled", "#C7A6A2")],
+        foreground=[("disabled", "#F8E8E7")],
     )
     return style
 
