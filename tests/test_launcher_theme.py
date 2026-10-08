@@ -18,6 +18,7 @@ from launcher_gui import (  # noqa: E402
     LauncherApp,
     _calculate_window_size,
     _render_config,
+    _stop_spawned_process,
     _use_stacked_layout,
     _validate_upstream_url,
 )
@@ -229,3 +230,218 @@ def test_render_config_omits_blank_model_to_preserve_client_request() -> None:
 
     parsed = tomllib.loads(rendered)
     assert "upstream_model" not in parsed["proxy"]
+
+
+def test_windows_stop_terminates_the_owned_process_tree() -> None:
+    calls = []
+
+    class FakeProcess:
+        pid = 4242
+        terminated = False
+        killed = False
+        waited = False
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: int) -> int:
+            self.waited = True
+            assert timeout == 5
+            return 0
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return types.SimpleNamespace(returncode=0)
+
+    process = FakeProcess()
+    _stop_spawned_process(process, runner=fake_run, platform="nt")
+
+    assert calls[0][0] == ["taskkill", "/PID", "4242", "/T", "/F"]
+    assert calls[0][1]["check"] is False
+    assert process.waited
+    assert not process.terminated
+    assert not process.killed
+
+
+def test_windows_stop_falls_back_when_taskkill_cannot_start() -> None:
+    class FakeProcess:
+        pid = 4242
+        terminated = False
+        killed = False
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: int) -> int:
+            assert timeout == 5
+            return 0
+
+    def unavailable_runner(*args, **kwargs):
+        raise FileNotFoundError("taskkill unavailable")
+
+    process = FakeProcess()
+    _stop_spawned_process(process, runner=unavailable_runner, platform="win32")
+
+    assert process.terminated
+    assert not process.killed
+
+
+def test_windows_stop_falls_back_when_taskkill_fails() -> None:
+    class FakeProcess:
+        pid = 4242
+        terminated = False
+        killed = False
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: int) -> int:
+            assert timeout == 5
+            return 0
+
+    process = FakeProcess()
+    _stop_spawned_process(
+        process,
+        runner=lambda *args, **kwargs: types.SimpleNamespace(returncode=1),
+        platform="nt",
+    )
+
+    assert process.terminated
+    assert not process.killed
+
+
+def test_windows_stop_falls_back_when_taskkill_exit_is_not_observed() -> None:
+    class FakeProcess:
+        pid = 4242
+        terminated = False
+        killed = False
+        waits = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: int) -> int:
+            assert timeout == 5
+            self.waits += 1
+            if self.waits == 1:
+                raise TimeoutError
+            return 0
+
+    process = FakeProcess()
+    _stop_spawned_process(
+        process,
+        runner=lambda *args, **kwargs: types.SimpleNamespace(returncode=0),
+        platform="win32",
+    )
+
+    assert process.terminated
+    assert not process.killed
+    assert process.waits == 2
+
+
+def test_non_windows_stop_uses_process_api_only() -> None:
+    class FakeProcess:
+        pid = 4242
+        terminated = False
+        killed = False
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: int) -> int:
+            assert timeout == 5
+            return 0
+
+    def unexpected_runner(*args, **kwargs):
+        raise AssertionError("runner must not be used")
+
+    process = FakeProcess()
+    _stop_spawned_process(process, runner=unexpected_runner, platform="linux")
+
+    assert process.terminated
+    assert not process.killed
+
+
+def test_stop_escalates_to_kill_after_wait_failure() -> None:
+    class FakeProcess:
+        pid = 4242
+        terminated = False
+        killed = False
+        waits = 0
+
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: int) -> int:
+            assert timeout == 5
+            self.waits += 1
+            if self.waits == 1:
+                raise TimeoutError
+            return 0
+
+    process = FakeProcess()
+    _stop_spawned_process(process, platform="linux")
+
+    assert process.terminated
+    assert process.killed
+    assert process.waits == 2
+
+
+def test_stop_does_nothing_for_exited_process() -> None:
+    class ExitedProcess:
+        pid = 4242
+
+        def poll(self):
+            return 0
+
+        def terminate(self) -> None:
+            raise AssertionError("terminate must not be used")
+
+        def kill(self) -> None:
+            raise AssertionError("kill must not be used")
+
+        def wait(self, timeout: int) -> int:
+            raise AssertionError("wait must not be used")
+
+    def unexpected_runner(*args, **kwargs):
+        raise AssertionError("runner must not be used")
+
+    _stop_spawned_process(
+        ExitedProcess(), runner=unexpected_runner, platform="win32"
+    )

@@ -171,6 +171,56 @@ def _find_proxy_exe() -> Path | None:
     return None
 
 
+def _stop_spawned_process(
+    process,
+    *,
+    runner=subprocess.run,
+    platform: str = sys.platform,
+) -> None:
+    """Stop the exact proxy process launched by this window.
+
+    A PyInstaller one-file executable uses a parent/child bootloader pair on
+    Windows. Terminating only the Popen handle can leave the other process
+    serving the port, so Windows must stop the owned process tree.
+    """
+    if process.poll() is not None:
+        return
+
+    if platform in {"nt", "win32"}:
+        creationflags = (
+            subprocess.CREATE_NO_WINDOW
+            if hasattr(subprocess, "CREATE_NO_WINDOW")
+            else 0
+        )
+        try:
+            result = runner(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                creationflags=creationflags,
+            )
+        except (OSError, subprocess.SubprocessError):
+            result = None
+        if result is not None and result.returncode == 0:
+            try:
+                process.wait(timeout=5)
+            except Exception:
+                pass
+            else:
+                return
+
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+    except Exception:
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except Exception:
+            pass
+
+
 def _fmt(n: int) -> str:
     return f"{n:,}"
 
@@ -794,14 +844,7 @@ class LauncherApp:
         # still be served by an instance this window didn't start, and the
         # window should keep telling the truth about that.
         if self.proc is not None:
-            try:
-                self.proc.terminate()
-                self.proc.wait(timeout=5)
-            except Exception:
-                try:
-                    self.proc.kill()
-                except Exception:
-                    pass
+            _stop_spawned_process(self.proc)
             self.proc = None
         self.status_var.set("未启动")
         self._set_dot(TEXT_FAINT)
