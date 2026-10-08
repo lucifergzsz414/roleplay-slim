@@ -237,6 +237,7 @@ def build_bandori_installer() -> Path:
     return _build_tk_exe(
         BANDORI_INSTALLER_SRC, "BandoriPet安装器", BANDORI_INSTALLER_EXE_NAME,
         "bandori_installer", BANDORI_DEPS, "patch_bandori",
+        icon=LAUNCHER_ICON, extra_data=LAUNCHER_EXTRA_DATA,
     )
 
 
@@ -245,6 +246,7 @@ def build_bandori_uninstaller() -> Path:
     return _build_tk_exe(
         BANDORI_UNINSTALLER_SRC, "BandoriPet卸载还原器", BANDORI_UNINSTALLER_EXE_NAME,
         "bandori_uninstaller", BANDORI_DEPS, "patch_bandori",
+        icon=LAUNCHER_ICON, extra_data=LAUNCHER_EXTRA_DATA,
     )
 
 

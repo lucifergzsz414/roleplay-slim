@@ -27,6 +27,21 @@ else:
 
 sys.path.insert(0, str(_bundle_dir / "installer_bandori"))
 
+from installer_theme import (  # noqa: E402
+    ACCENT,
+    BG,
+    CARD,
+    PANEL,
+    SUCCESS,
+    TEXT,
+    TEXT_DIM,
+    ScrollableBody,
+    apply_theme,
+    build_header,
+    center_window,
+    create_card,
+    load_brand_icon,
+)
 from patch_bandori import (  # noqa: E402
     BACKUP_SUFFIX,
     CONFIG_TOML,
@@ -73,15 +88,8 @@ class InstallerApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("BandoriPet · 上下文优化代理 安装工具")
-        self.root.geometry("640x460")
-        self.root.minsize(560, 400)
-
-        self.root.update_idletasks()
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        w = self.root.winfo_reqwidth()
-        h = self.root.winfo_reqheight()
-        self.root.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
+        apply_theme(self.root)
+        self._icon_img = load_brand_icon(self.root, _bundle_dir)
 
         self._install_running = False
         self._log_queue: list[tuple[str, str]] = []
@@ -89,56 +97,136 @@ class InstallerApp:
 
         self._build_ui()
         self._initial_log()
+        center_window(
+            self.root,
+            preferred_width=700,
+            preferred_height=650,
+            minimum_width=620,
+            minimum_height=520,
+        )
 
     def _build_ui(self) -> None:
-        title = ttk.Label(
-            self.root, text="BandoriPet · 上下文优化代理",
-            font=("Microsoft YaHei UI", 13, "bold"),
+        build_header(
+            self.root,
+            self._icon_img,
+            title="roleplay-slim",
+            subtitle="BandoriPet 上下文优化代理安装工具",
+            badge="安全安装",
         )
-        title.pack(pady=(16, 2))
 
-        subtitle = ttk.Label(
-            self.root, text="让 AI 记忆更聪明，同时节省 DeepSeek API 费用",
-            font=("Microsoft YaHei UI", 9),
+        self.scroll_body = ScrollableBody(self.root)
+        self.scroll_body.pack(fill=tk.BOTH, expand=True)
+        self.root.bind_all("<MouseWheel>", self.scroll_body.on_mousewheel)
+
+        dir_card = create_card(
+            self.scroll_body.body,
+            "桌宠位置",
+            "选择 BandoriPet 的 win-unpacked 目录",
         )
-        subtitle.pack(pady=(0, 14))
-
-        dir_frame = ttk.LabelFrame(self.root, text="桌宠安装目录 (win-unpacked)", padding=10)
-        dir_frame.pack(fill=tk.X, padx=16, pady=(0, 10))
+        dir_frame = tk.Frame(dir_card, bg=CARD)
+        dir_frame.pack(fill=tk.X)
 
         self.dir_var = tk.StringVar(value=_auto_detect_pet_dir())
-        dir_entry = ttk.Entry(dir_frame, textvariable=self.dir_var, font=("Consolas", 9))
+        dir_entry = ttk.Entry(
+            dir_frame,
+            textvariable=self.dir_var,
+            font=("Consolas", 9),
+            style="Installer.TEntry",
+        )
         dir_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
-        browse_btn = ttk.Button(dir_frame, text="浏览...", command=self._browse_dir)
+        browse_btn = ttk.Button(
+            dir_frame,
+            text="浏览目录",
+            command=self._browse_dir,
+            style="Installer.TButton",
+        )
         browse_btn.pack(side=tk.RIGHT)
 
-        log_frame = ttk.LabelFrame(self.root, text="安装进度", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
+        scope_card = create_card(
+            self.scroll_body.body,
+            "安装内容",
+            "只修改当前选择的桌宠目录，原文件会保留备份",
+        )
+        scope_rows = (
+            ("代理服务", f"本机 127.0.0.1:{PROXY_PORT}，不开放公网端口"),
+            ("上下文优化", "补丁接入角色对话请求，减少重复上下文开销"),
+            ("随时还原", "安装前备份关键文件，可用卸载还原器恢复"),
+        )
+        for index, (label, value) in enumerate(scope_rows):
+            row = tk.Frame(scope_card, bg=CARD)
+            row.pack(fill=tk.X, pady=(0, 7 if index < len(scope_rows) - 1 else 0))
+            tk.Label(
+                row,
+                text=label,
+                bg=CARD,
+                fg=TEXT,
+                font=("Microsoft YaHei UI", 9, "bold"),
+                width=11,
+                anchor=tk.W,
+            ).pack(side=tk.LEFT)
+            tk.Label(
+                row,
+                text=value,
+                bg=CARD,
+                fg=TEXT_DIM,
+                font=("Microsoft YaHei UI", 9),
+                anchor=tk.W,
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        log_card = create_card(
+            self.scroll_body.body,
+            "安装进度",
+            "准备与安装结果会在这里逐项显示",
+        )
+        log_frame = tk.Frame(log_card, bg=CARD)
+        log_frame.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(
-            log_frame, height=12, wrap=tk.WORD, font=("Consolas", 9),
-            state=tk.DISABLED, background="#1e1e1e", foreground="#d4d4d4",
-            insertbackground="#d4d4d4", relief=tk.FLAT, borderwidth=0,
+            log_frame,
+            height=7,
+            width=1,
+            wrap=tk.WORD,
+            font=("Consolas", 9),
+            state=tk.DISABLED,
+            background=PANEL,
+            foreground=TEXT_DIM,
+            insertbackground=TEXT,
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=12,
+            pady=10,
         )
-        log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
+        self.log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=self.log_scroll.set)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self.log_text.tag_configure("ok", foreground="#6a9955")
-        self.log_text.tag_configure("warn", foreground="#ce9178")
-        self.log_text.tag_configure("error", foreground="#f44747")
-        self.log_text.tag_configure("info", foreground="#569cd6")
-        self.log_text.tag_configure("bold", foreground="#dcdcaa", font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("ok", foreground=SUCCESS)
+        self.log_text.tag_configure("warn", foreground="#B45309")
+        self.log_text.tag_configure("error", foreground="#B91C1C")
+        self.log_text.tag_configure("info", foreground=ACCENT)
+        self.log_text.tag_configure(
+            "bold", foreground=TEXT, font=("Consolas", 9, "bold")
+        )
 
-        btn_frame = ttk.Frame(self.root)
-        btn_frame.pack(fill=tk.X, padx=16, pady=(0, 14))
+        btn_frame = tk.Frame(self.root, bg=BG)
+        btn_frame.pack(fill=tk.X, padx=24, pady=(4, 18))
 
-        self.install_btn = ttk.Button(btn_frame, text="▶  开始安装", command=self._start_install)
+        self.install_btn = ttk.Button(
+            btn_frame,
+            text="开始安装",
+            command=self._start_install,
+            style="Installer.Primary.TButton",
+        )
         self.install_btn.pack(side=tk.RIGHT, padx=(10, 0))
 
-        close_btn = ttk.Button(btn_frame, text="关闭", command=self.root.destroy)
+        close_btn = ttk.Button(
+            btn_frame,
+            text="关闭",
+            command=self.root.destroy,
+            style="Installer.TButton",
+        )
         close_btn.pack(side=tk.RIGHT)
 
     def _initial_log(self) -> None:
@@ -175,6 +263,11 @@ class InstallerApp:
         if path:
             self.dir_var.set(path)
 
+    def _scroll_to_log(self) -> None:
+        """Reveal the progress card before a background installation starts."""
+        self.root.update_idletasks()
+        self.scroll_body.canvas.yview_moveto(1.0)
+
     def _start_install(self) -> None:
         if self._install_running:
             return
@@ -197,7 +290,8 @@ class InstallerApp:
             return
 
         self._install_running = True
-        self.install_btn.configure(state=tk.DISABLED, text="⏳ 安装中...")
+        self.install_btn.configure(state=tk.DISABLED, text="安装中...")
+        self._scroll_to_log()
 
         thread = threading.Thread(target=self._run_install, args=(pet_path,), daemon=True)
         thread.start()
@@ -213,7 +307,7 @@ class InstallerApp:
 
     def _install_done(self) -> None:
         self._install_running = False
-        self.install_btn.configure(state=tk.NORMAL, text="▶  重新安装")
+        self.install_btn.configure(state=tk.NORMAL, text="重新安装")
 
     def _install(self, pet_dir: Path) -> None:
         log = self._log
@@ -244,16 +338,16 @@ class InstallerApp:
         backup = index_path.with_name(index_path.name + BACKUP_SUFFIX)
         if not backup.exists():
             shutil.copy2(index_path, backup)
-            log(f"  index.html → 备份", tag="ok")
+            log("  index.html → 备份", tag="ok")
         else:
-            log(f"  备份已存在，跳过", tag="info")
+            log("  备份已存在，跳过", tag="info")
 
         ai_backup = None
         if ai_config:
             ai_backup = ai_config.with_name(ai_config.name + BACKUP_SUFFIX)
             if not ai_backup.exists():
                 shutil.copy2(ai_config, ai_backup)
-                log(f"  ai_config.json → 备份", tag="ok")
+                log("  ai_config.json → 备份", tag="ok")
 
         log("")
         log("[3/5] Patch index.html (硬编码版本才有此字符串)...", tag="bold")
@@ -274,7 +368,7 @@ class InstallerApp:
         # NEITHER matched — one not matching just means this version uses
         # the other mechanism.
         if index_result is None and ai_config_result is None:
-            log(f"  index.html 和 ai_config.json 都未找到匹配的 DeepSeek URL", tag="error")
+            log("  index.html 和 ai_config.json 都未找到匹配的 DeepSeek URL", tag="error")
             self.root.after(0, lambda: messagebox.showerror(
                 "Patch 失败",
                 "index.html 和 ai_config.json 中都未找到 DeepSeek URL。\n"
@@ -291,7 +385,7 @@ class InstallerApp:
             CONFIG_TOML.format(port=PROXY_PORT), encoding="utf-8"
         )
         write_stop_script(config_dir, PROXY_PORT)
-        log(f"  config.toml", tag="ok")
+        log("  config.toml", tag="ok")
 
         shutil.copy2(proxy_src, config_dir / _PROXY_EXE_NAME)
         log(f"  {_PROXY_EXE_NAME}", tag="ok")
@@ -299,16 +393,16 @@ class InstallerApp:
         log("")
         log("[5/5] 创建启动脚本...", tag="bold")
         (pet_dir / "启动代理.bat").write_text(LAUNCH_PROXY_BAT, encoding="gbk")
-        log(f"  启动代理.bat", tag="ok")
+        log("  启动代理.bat", tag="ok")
         (pet_dir / "BandoriPet.bat").write_text(
             LAUNCH_PET_BAT.replace("{port}", str(PROXY_PORT)), encoding="gbk"
         )
-        log(f"  BandoriPet.bat", tag="ok")
+        log("  BandoriPet.bat", tag="ok")
 
         log("")
         log("=" * 50, tag="info")
         log("  安装完成！", tag="ok")
-        log(f"  以后双击「BandoriPet.bat」启动即可", tag="bold")
+        log("  以后双击「BandoriPet.bat」启动即可", tag="bold")
         log("=" * 50, tag="info")
 
         self.root.after(0, lambda: messagebox.showinfo(
