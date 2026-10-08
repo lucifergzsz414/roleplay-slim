@@ -28,3 +28,9 @@ def test_write_sha256_sidecar_uses_standard_lowercase_format(tmp_path: Path) -> 
     assert checksum_path.read_text(encoding="utf-8") == (
         f"{expected} *roleplay-slim启动器.zip\n"
     )
+
+
+def test_universal_release_archive_uses_a_stable_ascii_name() -> None:
+    build = _load_build_module()
+
+    assert build.LAUNCHER_ZIP_NAME == "roleplay-slim-windows-x64.zip"
