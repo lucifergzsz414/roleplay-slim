@@ -99,3 +99,24 @@ def test_proxy_from_toml_rejects_unknown_compressor_keys(tmp_path):
     )
     with pytest.raises(ValueError, match="unknown compressor config key"):
         ProxyConfig.from_toml(str(toml_path))
+
+
+def test_proxy_from_toml_accepts_an_upstream_model_override(tmp_path):
+    toml_path = tmp_path / "test.toml"
+    toml_path.write_text(
+        "[proxy]\n"
+        "upstream_base_url = 'https://dashscope.aliyuncs.com/compatible-mode/v1'\n"
+        "upstream_model = 'qwen3.6-plus'\n\n"
+        "[compressor]\n",
+        encoding="utf-8",
+    )
+
+    config = ProxyConfig.from_toml(str(toml_path))
+
+    assert config.upstream_model == "qwen3.6-plus"
+
+
+@pytest.mark.parametrize("value", [-1, "6", True])
+def test_proxy_rejects_invalid_anthropic_keep_recent_turns(value) -> None:
+    with pytest.raises((TypeError, ValueError), match="anthropic_keep_recent_turns"):
+        ProxyConfig(anthropic_keep_recent_turns=value)

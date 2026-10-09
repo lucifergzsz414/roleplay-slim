@@ -246,6 +246,11 @@ class StatsConfig:
 @dataclass
 class ProxyConfig:
     upstream_base_url: str = "https://api.deepseek.com/v1"
+    # Optional model rewrite for OpenAI-compatible upstreams. When blank,
+    # preserve the caller's model exactly as before. Installers can set this
+    # when the desktop app's built-in model name does not exist at the chosen
+    # provider.
+    upstream_model: str = ""
     upstream_api_key_env: str = "UPSTREAM_API_KEY"
     host: str = "127.0.0.1"
     port: int = 8791
@@ -270,6 +275,36 @@ class ProxyConfig:
     # itself and are never forwarded upstream.
     client_auth_tokens_extra: str = ""
 
+    # Opt-in: the Anthropic-format `/v1/messages` route is only registered
+    # (well, only *served* — see proxy/server.py) when this is non-empty.
+    # Left blank by default so an existing OpenAI-only deployment doesn't
+    # silently start accepting a second protocol pointed at nothing. Often a
+    # *different path* on the same provider, not a different host — e.g.
+    # DeepSeek serves its Anthropic-compatible endpoint under
+    # "https://api.deepseek.com/anthropic" while upstream_base_url points at
+    # ".../v1" for the OpenAI-shaped route.
+    anthropic_upstream_base_url: str = ""
+
+    # Anthropic requests need "keep the last N turns raw" the same way the
+    # OpenAI-side CompressorConfig.keep_recent_turns does, but scoped
+    # separately: the two routes ship different strategies entirely (see
+    # anthropic_proxy.py's module docstring for why), so tying this to
+    # compressor.keep_recent_turns would silently couple two unrelated
+    # settings the moment either strategy set changes.
+    anthropic_keep_recent_turns: int = 6
+
+    def __post_init__(self) -> None:
+        value = self.anthropic_keep_recent_turns
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(
+                "anthropic_keep_recent_turns must be an integer, "
+                f"got {type(value).__name__}"
+            )
+        if value < 0:
+            raise ValueError(
+                f"anthropic_keep_recent_turns must be >= 0, got {value}"
+            )
+
     @classmethod
     def from_toml(cls, path: str | Path) -> ProxyConfig:
         with open(path, "rb") as f:
@@ -278,8 +313,9 @@ class ProxyConfig:
         compressor = CompressorConfig.from_dict(data)
         stats = StatsConfig.from_dict(data)
         known = {
-            "upstream_base_url", "upstream_api_key_env", "host", "port",
+            "upstream_base_url", "upstream_model", "upstream_api_key_env", "host", "port",
             "client_auth_token_env", "client_auth_tokens_extra",
+            "anthropic_upstream_base_url", "anthropic_keep_recent_turns",
         }
         unknown = set(proxy_section) - known
         if unknown:

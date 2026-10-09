@@ -10,6 +10,53 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ### Added
 
+- Native Anthropic Messages API support: `POST /v1/messages`, parallel to
+  the existing OpenAI-shaped `/v1/chat/completions` — not a translation
+  layer between the two formats (explicitly out of scope, see
+  `ROADMAP.md`). Disabled by default; set `anthropic_upstream_base_url` to
+  enable it (often a different path prefix on the same provider than
+  `upstream_base_url`, e.g. DeepSeek serves it under `/anthropic`, not
+  `/v1`). Compression is scoped to one strategy —
+  `anthropic_proxy.trim_old_tool_results`, which replaces `tool_result`
+  block content in turns older than `anthropic_keep_recent_turns` with a
+  placeholder — chosen over porting every OpenAI-side strategy because a
+  synthetic-but-structurally-faithful benchmark showed it's the dominant
+  lever for this shape (67-85% on 10-30 turn tool-calling conversations,
+  vs. single-digit % for text dedup). Handles the protocol differences a
+  straight copy of the OpenAI route would get wrong: `x-api-key` +
+  `anthropic-version` auth (not `Authorization: Bearer`), and usage
+  reporting split across the `message_start` and `message_delta` SSE
+  events (mapped into the same `prompt_tokens`/`completion_tokens`/
+  `prompt_cache_hit_tokens` stats fields the OpenAI route uses, per
+  Anthropic's documented `total_input_tokens = cache_read_input_tokens +
+  cache_creation_input_tokens + input_tokens` identity). Design +
+  validation in `docs/designs/anthropic-protocol-support.md`.
+- `GET /stats?window=N` returns a nested `recent` block with the same
+  figures computed over only the last `N` requests, so a real recent
+  effect (a burst of duplicate-footer traffic, or a cache-hit decline as
+  a conversation grows) is visible instead of being diluted by the
+  all-time average. Purely additive — the top-level fields are
+  byte-identical with or without `window`. Design + real-data validation
+  in `docs/designs/stats-window.md`.
+
+### Fixed
+
+- `/stats`' upstream block was permanently `null` for every streaming
+  request (`stream: true`) — the vast majority of real chat client
+  traffic — because the proxy only ever parsed `usage` out of a
+  non-streaming JSON body and passed streaming SSE bytes through
+  unparsed. The final SSE chunk already carries the same `usage` block
+  when the client sets `stream_options.include_usage` (every client this
+  project targets does), so `stream_upstream()` now sniffs it out of the
+  `data: ...` lines it's already forwarding — via `httpx`'s own
+  incremental-UTF-8 `aiter_text()`, so a multi-byte character or a JSON
+  object split across network chunk boundaries still parses correctly —
+  without changing a single byte of what reaches the client. If more than
+  one usage-bearing line appears, the last one wins. Forwarding is
+  unaffected either way; this is purely a telemetry-side addition.
+
+### Added
+
 - `StatsStore.record()` now takes an optional `model` and persists it per
   request (`requests.model` column, auto-migrated on existing `stats.db`
   files via `ALTER TABLE`). The proxy passes the incoming request body's own

@@ -99,6 +99,29 @@ class StatsStore:
             "saved": before_tok - after_tok,
         }
 
+    def record_raw(self, tokens_before: int, tokens_after: int, model: str | None = None) -> dict:
+        """Same DB effect as `record()`, but for callers that already have
+        their own before/after size numbers and must not have this class
+        re-derive them via `estimate_messages_tokens` (which assumes
+        OpenAI-shaped `content` — a string or a list of `{"type": "text"}`
+        blocks). The Anthropic route computes the equivalent estimated-token
+        count from its own block types before calling this method. Routing it
+        through `record()` with synthetic OpenAI messages would re-estimate a
+        different payload. Column semantics and units are otherwise identical
+        to `record()`'s.
+        """
+        cursor = self._conn.execute(
+            "INSERT INTO requests (ts, tokens_before, tokens_after, model) VALUES (?, ?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), tokens_before, tokens_after, model),
+        )
+        self._conn.commit()
+        return {
+            "id": cursor.lastrowid,
+            "tokens_before": tokens_before,
+            "tokens_after": tokens_after,
+            "saved": tokens_before - tokens_after,
+        }
+
     def record_usage(self, usage: Any, row_id: int) -> dict | None:
         """Back-fill the request identified by ``row_id`` with the
         provider's usage figures.
@@ -136,12 +159,30 @@ class StatsStore:
             "prompt_cache_miss_tokens": miss,
         }
 
-    def summary(self) -> dict:
+    def summary(self, window: int | None = None) -> dict:
         """The same shape CompressionStats.summary() produced — every field
-        the /stats endpoint and its tests rely on."""
+        the /stats endpoint and its tests rely on.
+
+        window: when given, every figure below is computed over only the
+        most recent `window` requests (by insertion order) instead of the
+        full lifetime history. A cumulative all-time average dilutes a
+        real recent effect (e.g. a burst of duplicate-footer traffic
+        pushing compression to 40%+) down toward whatever the very first
+        requests looked like, and it makes a real recent cache-hit decline
+        indistinguishable from "the number always looked like this" —
+        window=N answers "what's happening lately" instead. None (the
+        default) is the original all-time behavior, unchanged for every
+        existing caller.
+        """
+        row_filter = ""
+        params: tuple = ()
+        if window is not None:
+            row_filter = "WHERE id IN (SELECT id FROM requests ORDER BY id DESC LIMIT ?)"
+            params = (window,)
         count, before, after = self._conn.execute(
             "SELECT COUNT(*), COALESCE(SUM(tokens_before), 0), "
-            "COALESCE(SUM(tokens_after), 0) FROM requests"
+            f"COALESCE(SUM(tokens_after), 0) FROM requests {row_filter}",
+            params,
         ).fetchone()
         saved = before - after
         pct = (saved / before * 100) if before else 0.0
@@ -151,14 +192,26 @@ class StatsStore:
             "tokens_after_total": after,
             "tokens_saved_total": saved,
             "savings_pct": round(pct, 2),
-            "upstream": self._upstream_summary(),
+            "upstream": self._upstream_summary(window),
         }
 
-    def _upstream_summary(self) -> dict | None:
+    def _upstream_summary(self, window: int | None = None) -> dict | None:
+        # The window applies to "the last N requests", not "the last N
+        # requests that happen to carry upstream data" — a request with no
+        # usage sample (e.g. a non-200 response) still occupies a slot in
+        # the window, same as it does in summary()'s request_count.
+        if window is not None:
+            recent_ids = "id IN (SELECT id FROM requests ORDER BY id DESC LIMIT ?) AND "
+            base_params: tuple = (window,)
+        else:
+            recent_ids = ""
+            base_params = ()
+
         usage_count, prompt_total, completion_total = self._conn.execute(
             "SELECT COUNT(upstream_prompt), COALESCE(SUM(upstream_prompt), 0), "
             "COALESCE(SUM(upstream_completion), 0) FROM requests "
-            "WHERE upstream_prompt IS NOT NULL"
+            f"WHERE {recent_ids}upstream_prompt IS NOT NULL",
+            base_params,
         ).fetchone()
         if not usage_count:
             return None
@@ -172,7 +225,8 @@ class StatsStore:
         }
         cache_count, hit, miss = self._conn.execute(
             "SELECT COUNT(cache_hit), COALESCE(SUM(cache_hit), 0), "
-            "COALESCE(SUM(cache_miss), 0) FROM requests WHERE cache_hit IS NOT NULL"
+            f"COALESCE(SUM(cache_miss), 0) FROM requests WHERE {recent_ids}cache_hit IS NOT NULL",
+            base_params,
         ).fetchone()
         if cache_count:
             counted = hit + miss

@@ -18,6 +18,8 @@ the reasoning, trade-offs, and what was deliberately cut from scope.
 | Semantic-cache design review — original proposal conflated two things; the money-saving half (caching LLM replies) rejected outright, the CPU-saving half left undocumented pending real profiling evidence | [`semantic-cache.md`](docs/designs/semantic-cache.md) | Unreleased |
 | Telegram adapter (`examples/telegram_bot.py`) and a generic OpenAI-compatible / OpenWebUI-style adapter (`examples/openwebui_style_adapter.py`) | — | Unreleased |
 | Per-request `model` recorded in `StatsStore` | [`per-request-model.md`](docs/designs/per-request-model.md) | Unreleased |
+| `/stats?window=N` recent-N view (real recent effect visible instead of diluted by the all-time average) | [`stats-window.md`](docs/designs/stats-window.md) | Unreleased |
+| Native Anthropic protocol support (`POST /v1/messages`, parallel to the existing OpenAI route — not translation between the two) — scoped to one compression strategy (`trim_old_tool_results`) after a hand-run benchmark showed it's the dominant lever for this shape | [`anthropic-protocol-support.md`](docs/designs/anthropic-protocol-support.md) | Unreleased |
 
 Each design doc records where the shipped implementation deliberately
 diverged from the original proposal (usually: cutting scope that turned out
@@ -46,9 +48,15 @@ larger feature proposal should start (a short design doc in
 
 ## Explicitly out of scope
 
-- **Multi-provider protocol translation** (Anthropic format, etc.) and
-  **upstream gateway features** (failover, rate limiting, key rotation
-  across multiple providers). Both would turn this into "another OpenAI
+- **Cross-format protocol translation** — a request arriving in one wire
+  format (say, Anthropic) being rewritten and forwarded in a *different*
+  format (say, OpenAI) to reach a mismatched upstream. Native Anthropic
+  support (above) is not this: `/v1/messages` forwards Anthropic-shaped
+  requests to an Anthropic-shaped upstream, `/v1/chat/completions` forwards
+  OpenAI-shaped requests to an OpenAI-shaped upstream — two parallel
+  passthrough paths, zero cross-format rewriting between them.
+- **Upstream gateway features** (failover, rate limiting, key rotation
+  across multiple providers). Would turn this into "another OpenAI
   gateway" and dilute the actual differentiator (structure-aware
   compression), which is the reason to reach for this over a generic
   compressing proxy in the first place.

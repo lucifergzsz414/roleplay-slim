@@ -186,6 +186,64 @@ def test_record_without_model_stays_null(tmp_path):
     store.close()
 
 
+def test_window_restricts_to_the_most_recent_n_requests(tmp_path):
+    """window=N must reflect only the last N requests by insertion order,
+    not a random N of them and not silently falling back to all-time."""
+    store = StatsStore(str(tmp_path / "s.db"))
+    store.record(MSGS, MSGS)  # oldest — uncompressed, tokens_after == tokens_before
+    store.record(MSGS, [])  # newest — fully "compressed away", tokens_after == 0
+    all_time = store.summary()
+    recent_1 = store.summary(window=1)
+    assert all_time["request_count"] == 2
+    assert recent_1["request_count"] == 1
+    # The most recent request compressed everything away — window=1 must
+    # reflect that alone, not be diluted by the first (uncompressed) one.
+    assert recent_1["tokens_after_total"] == 0
+    assert all_time["tokens_after_total"] > 0
+    store.close()
+
+
+def test_window_larger_than_history_behaves_like_all_time(tmp_path):
+    store = StatsStore(str(tmp_path / "s.db"))
+    store.record(MSGS, [])
+    store.record(MSGS, [])
+    assert store.summary(window=1000) == store.summary()
+    store.close()
+
+
+def test_window_upstream_reflects_only_recent_rows(tmp_path):
+    """The upstream (provider-reported) block must respect the same
+    window as the token-estimate figures, keyed off request recency —
+    not off "the last N rows that happen to have upstream data"."""
+    store = StatsStore(str(tmp_path / "s.db"))
+    old = store.record(MSGS, [])
+    store.record_usage({"prompt_tokens": 100, "completion_tokens": 50}, old["id"])
+    new = store.record(MSGS, [])
+    store.record_usage({"prompt_tokens": 10, "completion_tokens": 5}, new["id"])
+
+    all_time = store.summary()["upstream"]
+    recent_1 = store.summary(window=1)["upstream"]
+    assert all_time["usage_sample_count"] == 2
+    assert all_time["prompt_tokens_total"] == 110
+    assert recent_1["usage_sample_count"] == 1
+    assert recent_1["prompt_tokens_total"] == 10
+    store.close()
+
+
+def test_window_upstream_none_when_no_recent_row_has_usage(tmp_path):
+    """An old row carrying usage must not leak into a window that only
+    covers newer, usage-less rows — matches upstream_summary()'s "None
+    means no measurement" contract, scoped to the window."""
+    store = StatsStore(str(tmp_path / "s.db"))
+    old = store.record(MSGS, [])
+    store.record_usage({"prompt_tokens": 100, "completion_tokens": 50}, old["id"])
+    store.record(MSGS, [])  # newer, no usage back-filled
+
+    assert store.summary(window=1)["upstream"] is None
+    assert store.summary()["upstream"] is not None
+    store.close()
+
+
 def test_migrates_pre_existing_db_missing_model_column(tmp_path):
     """A stats.db written before this column existed must still open and
     accept new writes — CREATE TABLE IF NOT EXISTS doesn't retrofit an
