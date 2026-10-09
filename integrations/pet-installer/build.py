@@ -20,6 +20,7 @@ Requirements:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -58,6 +59,21 @@ BANDORI_UNINSTALLER_EXE_NAME = "BandoriPet卸载还原器.exe"
 BANDORI_ZIP_NAME = "邦多利桌宠-上下文优化代理.zip"
 BANDORI_README_SRC = ROOT / "使用说明_BandoriPet.txt"
 
+# Generic launcher: it starts the local proxy and exposes a copyable OpenAI-
+# compatible URL.  It deliberately carries no app-specific patch modules.
+LAUNCHER_SRC = ROOT.parent / "launcher" / "launcher_gui.py"
+LAUNCHER_DEPS: list[Path] = []
+LAUNCHER_HIDDEN_IMPORTS: list[str] = []
+LAUNCHER_EXE_NAME = "roleplay-slim启动器.exe"
+LAUNCHER_ZIP_NAME = "roleplay-slim-windows-x64.zip"
+LAUNCHER_README_SRC = ROOT / "使用说明_启动器.txt"
+LAUNCHER_ASSETS = ROOT.parent / "launcher" / "assets"
+LAUNCHER_ICON = LAUNCHER_ASSETS / "app.ico"
+LAUNCHER_EXTRA_DATA = [
+    (LAUNCHER_ASSETS / "app.ico", "assets"),
+    (LAUNCHER_ASSETS / "app_header.png", "assets"),
+]
+
 
 def pyinstaller_available() -> bool:
     try:
@@ -87,7 +103,9 @@ def run(cmd: list[str], **kwargs) -> None:
 
 def _build_tk_exe(
     source: Path, name: str, exe_name: str, workdir_suffix: str,
-    deps: list[Path], hidden_import: str,
+    deps: list[Path], hidden_import: str | list[str],
+    icon: Path | None = None,
+    extra_data: list[tuple[Path, str]] | None = None,
 ) -> Path:
     """Shared PyInstaller invocation for the tkinter GUIs (installer,
     uninstaller, and their BandoriPet counterparts) — all of them bundle a
@@ -116,9 +134,17 @@ def _build_tk_exe(
     # confuses the PyInstaller import analyser)
     for dep in deps:
         cmd.extend(["--add-data", f"{dep}{os.pathsep}{dep.parent.name}"])
+        cmd.extend(["--paths", str(dep.parent)])
 
-    # Hidden imports that PyInstaller might miss
-    cmd.extend(["--hidden-import", hidden_import])
+    hidden_imports = [hidden_import] if isinstance(hidden_import, str) else hidden_import
+    for module_name in hidden_imports:
+        cmd.extend(["--hidden-import", module_name])
+
+    if icon is not None and icon.is_file():
+        cmd.extend(["--icon", str(icon)])
+    for data_file, destination in extra_data or []:
+        if data_file.is_file():
+            cmd.extend(["--add-data", f"{data_file}{os.pathsep}{destination}"])
 
     cmd.append(str(source))
 
@@ -167,12 +193,25 @@ def build_bandori_uninstaller() -> Path:
     )
 
 
+def build_launcher() -> Path:
+    """Build the generic launcher without any app-specific patch code."""
+    return _build_tk_exe(
+        LAUNCHER_SRC,
+        "roleplay-slim启动器",
+        LAUNCHER_EXE_NAME,
+        "launcher",
+        LAUNCHER_DEPS,
+        LAUNCHER_HIDDEN_IMPORTS,
+        icon=LAUNCHER_ICON,
+        extra_data=LAUNCHER_EXTRA_DATA,
+    )
+
+
 def build_proxy() -> Path:
     """Build the compression proxy as a single-file .exe."""
     step("Building roleplay-slim-proxy.exe")
     DIST.mkdir(exist_ok=True)
 
-    output = DIST / PROXY_EXE_NAME
     workpath = DIST / "_build_proxy"
     specpath = DIST / "_build_proxy"
 
@@ -249,6 +288,14 @@ def package_zip(zip_name: str, files: list[Path], readme: Path | None = None) ->
     return zip_path
 
 
+def write_sha256_sidecar(archive: Path) -> Path:
+    """Write a sha256sum-compatible checksum beside an archive."""
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    checksum_path = archive.with_name(f"{archive.name}.sha256")
+    checksum_path.write_text(f"{digest} *{archive.name}\n", encoding="utf-8")
+    return checksum_path
+
+
 def main() -> None:
     installer_only = "--installer-only" in sys.argv
     uninstaller_only = "--uninstaller-only" in sys.argv
@@ -259,14 +306,17 @@ def main() -> None:
     bandori_uninstaller_only = "--bandori-uninstaller-only" in sys.argv
     bandori_only = "--bandori-only" in sys.argv  # both bandori exes, no proxy rebuild
     do_bandori_zip = "--bandori-zip" in sys.argv
+    launcher_only = "--launcher-only" in sys.argv
+    do_launcher_zip = "--launcher-zip" in sys.argv
 
     any_only = (
         installer_only or uninstaller_only or proxy_only
         or bandori_installer_only or bandori_uninstaller_only or bandori_only
+        or launcher_only
     )
     # Only rebuild the default Mutsumi trio if a build flag is explicitly
     # given, AND zip-only doesn't imply rebuild.
-    want_build = any_only or (not do_zip and not do_bandori_zip)
+    want_build = any_only or (not do_zip and not do_bandori_zip and not do_launcher_zip)
     both = want_build and not any_only
 
     if not pyinstaller_available():
@@ -281,6 +331,7 @@ def main() -> None:
     proxy = None
     bandori_installer = None
     bandori_uninstaller = None
+    launcher = None
 
     if installer_only or both:
         installer = build_installer()
@@ -296,6 +347,28 @@ def main() -> None:
 
     if bandori_uninstaller_only or bandori_only:
         bandori_uninstaller = build_bandori_uninstaller()
+
+    if launcher_only:
+        launcher = build_launcher()
+
+    if do_launcher_zip:
+        if not launcher:
+            launcher = DIST / LAUNCHER_EXE_NAME
+        if not proxy:
+            proxy = DIST / PROXY_EXE_NAME
+        if not launcher.is_file() or not proxy.is_file():
+            print("[X] Launcher + proxy exe must both exist to package zip. Build them first.")
+            sys.exit(1)
+        if not LAUNCHER_README_SRC.is_file():
+            print(f"[X] {LAUNCHER_README_SRC.name} is missing.")
+            sys.exit(1)
+        archive = package_zip(
+            LAUNCHER_ZIP_NAME,
+            [launcher, proxy],
+            LAUNCHER_README_SRC,
+        )
+        checksum_path = write_sha256_sidecar(archive)
+        print(f"  [OK] SHA-256 -> {checksum_path}")
 
     if do_zip:
         if not installer:
@@ -344,10 +417,14 @@ def main() -> None:
         print(f"  Bandori安装器: {bandori_installer}")
     if bandori_uninstaller:
         print(f"  Bandori卸载器: {bandori_uninstaller}")
+    if launcher:
+        print(f"  启动器:      {launcher}")
     if do_zip:
         print(f"  分发包:      {DIST / ZIP_NAME}")
     if do_bandori_zip:
         print(f"  Bandori分发包: {DIST / BANDORI_ZIP_NAME}")
+    if do_launcher_zip:
+        print(f"  通用分发包:  {DIST / LAUNCHER_ZIP_NAME}")
     print(f"{'=' * 55}")
 
 
