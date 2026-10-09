@@ -28,6 +28,25 @@ experience assumed.
 > 37,176 → 19,545 tokens (47.4% less). Persona prefix never touched.
 > [See the proof](#benchmarks) · [Try it in 30s](#30-second-tryout)
 
+## Windows GUI beta (no Python required)
+
+[Open the latest Windows beta](https://github.com/lucifergzsz414/roleplay-slim/releases/tag/universal-windows-beta-2026-10-08) ·
+[Download the ZIP](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-08/roleplay-slim-windows-x64.zip) ·
+[SHA-256 checksum](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-08/roleplay-slim-windows-x64.zip.sha256)
+
+![roleplay-slim Windows launcher](docs/images/windows-launcher.png)
+
+1. Download the ZIP and extract all files into a new folder.
+2. Run `roleplay-slim启动器.exe` and choose the provider your chat app uses.
+3. Copy the local API address shown by the launcher into the chat app's API URL field.
+4. Select “开始整理”, keep the launcher open, and continue chatting normally.
+
+The API key remains in the original chat app; the launcher neither reads nor stores it.
+The proxy listens on `127.0.0.1` by default and does not change the system proxy,
+hosts file, firewall, or registry. This beta is not code-signed yet, so Windows may
+show a SmartScreen warning. Download it only from this repository's GitHub Release
+and verify the SHA-256 checksum first. The current launcher UI is in Chinese.
+
 ## The problem
 
 ```mermaid
