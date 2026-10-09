@@ -90,7 +90,6 @@ LAUNCHER_DEPS = [
     CYRENE_INSTALLER_DIR / "patch_cyrene.py",
 ]
 LAUNCHER_HIDDEN_IMPORTS = ["install", "patch_bandori", "patch_cyrene"]
-SECURITY_HELPER_IMPORTS = ["safe_process", "credential_store"]
 LAUNCHER_EXE_NAME = "roleplay-slim启动器.exe"
 LAUNCHER_ZIP_NAME = "roleplay-slim-windows-x64.zip"
 LAUNCHER_README_SRC = ROOT / "使用说明_启动器.txt"
@@ -162,7 +161,6 @@ def _build_tk_exe(
         "--workpath", str(workpath),
         "--specpath", str(specpath),
         "--noconsole",
-        "--paths", str(ROOT),
     ]
 
     # Ensure the patch-logic module is included (runtime sys.path insertion
@@ -182,10 +180,10 @@ def _build_tk_exe(
     # (it can patch any of the three adapted apps), the single-app installers
     # need exactly one — both spellings accepted so neither has to carry a
     # one-element list.
-    requested_hidden_imports = (
+    hidden_imports = (
         [hidden_import] if isinstance(hidden_import, str) else hidden_import
     )
-    for _hidden in [*requested_hidden_imports, *SECURITY_HELPER_IMPORTS]:
+    for _hidden in hidden_imports:
         cmd.extend(["--hidden-import", _hidden])
 
     if icon is not None and icon.is_file():

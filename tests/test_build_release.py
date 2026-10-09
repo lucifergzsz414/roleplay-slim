@@ -34,3 +34,46 @@ def test_universal_release_archive_uses_a_stable_ascii_name() -> None:
     build = _load_build_module()
 
     assert build.LAUNCHER_ZIP_NAME == "roleplay-slim-windows-x64.zip"
+
+
+def test_tk_build_only_requests_declared_hidden_imports(
+    tmp_path: Path, monkeypatch
+) -> None:
+    build = _load_build_module()
+    source = tmp_path / "launcher.py"
+    source.write_text("pass\n", encoding="utf-8")
+    dependency_dir = tmp_path / "adapter"
+    dependency_dir.mkdir()
+    dependency = dependency_dir / "install.py"
+    dependency.write_text("pass\n", encoding="utf-8")
+    captured: list[str] = []
+
+    def fake_run(command: list[str], **_kwargs) -> None:
+        captured.extend(command)
+        (tmp_path / "launcher.exe").write_bytes(b"test executable")
+
+    monkeypatch.setattr(build, "DIST", tmp_path)
+    monkeypatch.setattr(build, "run", fake_run)
+
+    result = build._build_tk_exe(
+        source,
+        "launcher",
+        "launcher.exe",
+        "launcher",
+        [dependency],
+        ["install"],
+    )
+
+    hidden_imports = [
+        captured[index + 1]
+        for index, argument in enumerate(captured)
+        if argument == "--hidden-import"
+    ]
+    search_paths = [
+        captured[index + 1]
+        for index, argument in enumerate(captured)
+        if argument == "--paths"
+    ]
+    assert result == tmp_path / "launcher.exe"
+    assert hidden_imports == ["install"]
+    assert search_paths == [str(dependency_dir)]

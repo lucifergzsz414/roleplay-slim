@@ -35,7 +35,7 @@ roleplay-slim-proxy.exe
 1. 双击 roleplay-slim启动器.exe。
 
 2. 在“AI 服务”中选择实际使用的服务商。
-   预设包含 DeepSeek、OpenAI 和硅基流动，也可以选择自定义地址。
+   预设包含 DeepSeek、OpenAI、硅基流动和阿里云百炼，也可以选择自定义地址。
    “模型名称”留空时，会沿用聊天软件请求中的模型。
 
 3. 在“接入应用”中选择“通用模式”。
