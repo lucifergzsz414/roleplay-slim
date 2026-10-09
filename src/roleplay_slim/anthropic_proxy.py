@@ -130,6 +130,6 @@ def compress_anthropic_messages(messages: list[dict], keep_recent_turns: int) ->
 
 __all__ = [
     "compress_anthropic_messages",
-    "trim_old_tool_results",
     "estimate_anthropic_messages_chars",
+    "trim_old_tool_results",
 ]
