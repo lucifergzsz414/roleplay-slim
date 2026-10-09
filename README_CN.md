@@ -38,7 +38,8 @@
 API Key 仍由原聊天软件管理，启动器不会读取或保存它。代理默认只监听
 `127.0.0.1`，不会修改系统代理、hosts、防火墙或注册表。当前测试版尚未进行
 Windows 代码签名，首次运行时可能出现 SmartScreen 提示；请只从本项目的
-GitHub Release 下载，并先核对 SHA-256。
+GitHub Release 下载，并先核对 SHA-256。遇到连接或认证问题时，先查看
+[Windows 图形版常见问题](docs/windows-troubleshooting-cn.md)。
 
 ## 问题
 
