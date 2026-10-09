@@ -45,7 +45,8 @@ The API key remains in the original chat app; the launcher neither reads nor sto
 The proxy listens on `127.0.0.1` by default and does not change the system proxy,
 hosts file, firewall, or registry. This beta is not code-signed yet, so Windows may
 show a SmartScreen warning. Download it only from this repository's GitHub Release
-and verify the SHA-256 checksum first. The current launcher UI is in Chinese.
+and verify the SHA-256 checksum first. The current launcher UI is in Chinese. See
+[Windows GUI troubleshooting](docs/windows-troubleshooting.md) for common errors.
 
 ## The problem
 

@@ -1,0 +1,121 @@
+name: 错误报告 / Bug report
+description: 报告可复现的启动器、代理或压缩行为问题
+title: "[Bug]: "
+labels: ["bug"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先查看 [Windows 常见问题](https://github.com/lucifergzsz414/roleplay-slim/blob/master/docs/windows-troubleshooting-cn.md)。
+
+        **不要粘贴 API Key、Authorization 请求头、完整聊天记录、persona 或其他隐私内容。**
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: 使用方式
+      description: 问题发生在哪种安装或接入方式？
+      options:
+        - Windows 图形版
+        - Python 代理
+        - Python 库
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: Windows 图形版填写 Release 标签；Python 版填写 `pip show roleplay-slim` 的版本。
+      placeholder: "例如：universal-windows-beta-2026-10-08 或 0.4.1"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 操作系统与环境
+      placeholder: "例如：Windows 11 24H2，x64"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: 请求协议
+      options:
+        - OpenAI Chat Completions (`/v1/chat/completions`)
+        - Anthropic Messages (`/v1/messages`)
+        - 不确定
+        - 不涉及 API 请求
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: 模型服务商
+      description: 只填写服务商名称和模型名，不要填写密钥。
+      placeholder: "例如：DeepSeek / deepseek-chat"
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 实际发生了什么？
+      description: 请写明界面提示、HTTP 状态码和可见现象。
+      placeholder: "描述实际结果；可直接拖入已遮盖隐私的截图。"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 发送……
+        4. 出现……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+      placeholder: "你原本期望看到什么？"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 错误信息或日志
+      description: 仅粘贴与问题有关的片段，并先删除密钥、请求头和聊天正文。
+      render: shell
+
+  - type: textarea
+    id: message_shape
+    attributes:
+      label: 最小消息结构（压缩问题建议填写）
+      description: 不要提交真实对话。请用虚构内容给出最小 message array，或描述角色顺序、重复轮次、多模态内容和 tool calls 的形状。
+      render: json
+
+  - type: textarea
+    id: config
+    attributes:
+      label: 最小配置（可选）
+      description: 只保留复现问题所需字段；请用占位值替换所有秘密和私人地址。
+      render: toml
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 若使用 Windows 图形版，我已查看 Windows 常见问题；其他使用方式不适用。我也已确认没有重复 Issue。
+          required: true
+        - label: 我已删除 API Key、Authorization 请求头、聊天正文、persona 和其他隐私内容。
+          required: true
