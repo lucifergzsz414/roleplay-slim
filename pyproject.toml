@@ -29,6 +29,7 @@ dev = [
     "pytest>=8.0",
     "hypothesis>=6.100",
     "mypy>=1.10",
+    "Pillow>=10.0",
     "ruff>=0.8",
 ]
 
