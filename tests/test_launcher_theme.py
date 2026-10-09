@@ -5,8 +5,12 @@ import types
 from pathlib import Path
 
 import pytest
-import tomllib
 from PIL import Image
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 LAUNCHER_DIR = Path(__file__).resolve().parents[1] / "integrations" / "launcher"
 ASSETS_DIR = LAUNCHER_DIR / "assets"
