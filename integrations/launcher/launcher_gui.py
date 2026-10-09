@@ -78,7 +78,7 @@ else:
     _bundle_dir = _base
 
 _PROXY_EXE_NAME = "roleplay-slim-proxy.exe"
-DEFAULT_PORT = 8795  # 8791=若叶睦 8792=邦多利 8793=Cyrene，这里另起一个避免打架
+DEFAULT_PORT = 8795  # Dedicated loopback port for the generic launcher.
 
 UPSTREAM_PRESETS: dict[str, dict[str, str]] = {
     "DeepSeek": {
