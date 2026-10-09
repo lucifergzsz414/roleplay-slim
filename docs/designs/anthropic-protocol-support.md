@@ -1,6 +1,6 @@
 # 设计稿：原生支持 Anthropic 协议（`/v1/messages`）
 
-状态：已实现 · 2026-09-03 · 由真实踩坑触发的需求
+状态：已实现 · 2026-09-03
 
 ## 实现记录（2026-09-03）
 
@@ -31,26 +31,14 @@
   `tests/test_proxy.py` 追加10个路由级测试（404兜底、正确的上游路径+
   请求头、客户端凭据优先、`system`字段透传不动、旧`tool_result`裁剪、
   代理鉴权、非流式/流式 usage 记录、流式字节转发不受影响）
-- 全部246个测试通过（227原有+9+10新增），未产生回归
-- **真机端到端验证**：单测都是 MockTransport，额外起了一个临时代理实例
-  指向 DeepSeek 真实的 Anthropic 兼容端点，用真实 key 打了非流式+流式
-  各一次真实请求——真实拿到 Anthropic 格式回复、`/stats` 的 usage 映射
-  在真实数据上核对无误、流式的 `message_start`/`message_delta` merge
-  逻辑用真实事件流验证通过。细节见 `anthropic-protocol-log.md`
+- 路由、压缩、鉴权、usage 映射和流式透传均有独立测试覆盖
 
 ## 背景
 
-roleplay-slim 目前只认 OpenAI 线格式（`POST /v1/chat/completions`）。真实
-遇到的问题：Cyrene-Agent 的 DeepSeek 预设默认走 Anthropic transport
-（`POST /v1/messages`），装上我们代理后代理把这个路径原样转发给
-OpenAI 兼容的上游，得到 401——最后是在**安装器**里把 Cyrene 的
-`explicitTransport` 强制改成 `"openai"` 解决的（见
-`cyrene-installer-log.md` 追加2）。
-
-这次修复有效，但只覆盖了"我们能改的客户端"。本机同时跑着 Permafrost/TAMP，
-专门给 Claude Code（本身就是 Anthropic 协议客户端）做代理——如果代理原生
-认 Anthropic 格式，这类客户端能直接接进来用压缩，不需要每个客户端单独
-想办法把 transport 掰成 OpenAI 形状。
+roleplay-slim 最初只接受 OpenAI 线格式（`POST /v1/chat/completions`）。
+使用 Anthropic Messages API 的客户端无法直接接入，必须在客户端侧切换协议，
+或者完全绕过压缩代理。原生支持 `/v1/messages` 后，两类客户端都能使用相同的
+本地入口，而不需要针对具体应用修改 transport 设置。
 
 **这不是"协议转换"**：不做 Anthropic↔OpenAI 之间的格式翻译（那是
 `ROADMAP.md` 明确排除的范围，会把这个项目拖进"通用网关"的坑）。这里说的
@@ -115,18 +103,13 @@ OpenAI 兼容的上游，得到 401——最后是在**安装器**里把 Cyrene 
   格式单独实现一份~~ —— 已被下方跑分回答：不需要一次性搬全部策略，
   `history_window` 的 tool_result 裁剪是主要杠杆，dedupe 是次要的，
   `strip_stage_directions`/`_summarize_old_turns` 可以先不做。
-- 值不值得为了这一个协议新增字段而扩大 `ProxyConfig` 的复杂度？如果
-  当前唯一驱动力还是"Cyrene + Permafrost/TAMP 这两个本机场景"，工作量
-  投入产出比要重新算一遍——这两个场景目前都已经有本机可用的绕过方案
-  （装器强改 transport / Permafrost 自己就是 Anthropic 代理），原生支持
-  更多是"让别人也能直接用"的价值，不是解决本机眼下的真实阻塞。
+- 值不值得为了第二种协议新增字段并扩大 `ProxyConfig` 的复杂度？实现前需要
+  先验证真实的压缩收益，并确保两个协议的路由、鉴权和 usage 统计彼此隔离。
 
 ## 验证：合成样本手工跑分（2026-09-03）
 
-没有现成的真实 Anthropic 格式流量抓包（Permafrost/TAMP 的日志只记了启动
-横幅，没落地过完整请求体，改代码去抓一段真实会话属于新的工作量，本次
-不做）。改用项目自己在 `test_optimizer_real_shape.py`/`benchmark-fidelity.md`
-里已经用过的方法论：**结构忠实的合成样本**——按 Anthropic 真实格式
+验证使用项目在 `test_optimizer_real_shape.py`/`benchmark-fidelity.md`
+里已有的方法论：**结构忠实的合成样本**——按 Anthropic 真实格式
 （`system` 独立字段、`content` 强制 block 数组、`tool_use`/`tool_result`
 真实往返）手写一段多轮工具调用对话，明确标注为合成数据，不是真实流量。
 
@@ -149,11 +132,8 @@ OpenAI 兼容的上游，得到 401——最后是在**安装器**里把 Cyrene 
 路径压缩天花板低，这个假设是错的——真正的杠杆根本不在 dedupe（text block
 去重只有个位数百分比，因为占比小），而在**旧轮次的 `tool_result` 内容**：
 一次 `Read`/`Bash` 工具调用的原始输出一旦被推出"最近N轮"窗口，价值衰减
-很快，但原样占用的字符数不衰减。这跟 `cyrene-installer-log.md` 里之前
-否决掉的"给小睦的 tool 消息做压缩"结论正好相反——**否决是对的，因为小睦
-的 tool 消息从不进入长期历史；但对 Claude-Code-形状的 agentic 客户端
-（真实、持续复用同一个工具调用历史的场景），旧工具输出正是压缩收益的
-主要来源**，不是这个项目之前想的"空对空的点子"。
+很快，但原样占用的字符数不衰减。对于持续复用工具调用历史的 agentic
+客户端，旧工具输出正是压缩收益的主要来源。
 
 也就是说：`history_window` 这个策略本身不需要重写，**只需要把它的
 "trim 模式"从操作字符串 `content` 扩展到操作 `content` 数组里的
@@ -168,7 +148,5 @@ OpenAI 兼容的上游，得到 401——最后是在**安装器**里把 Cyrene 
 主要杠杆（`history_window` 裁剪旧 `tool_result`）范围明确、工作量可控，
 不需要一次性搬全部策略过去。
 
-剩下唯一没解答的是"值不值得做"这个优先级问题，不是"能不能做"——目前
-两个真实驱动场景（Cyrene、Permafrost/TAMP）都已经有本机能用的绕过方案，
-原生支持的增量价值主要是"让别人也能直接用"，不是解决自己眼下的阻塞。
-这笔投入产出账需要用户决定要不要现在排，不是技术判断能替他做的。
+原生支持的价值在于让 Anthropic 客户端直接接入，同时保持与 OpenAI 路径
+完全分离；它不是跨协议翻译，也没有扩大成通用网关。
