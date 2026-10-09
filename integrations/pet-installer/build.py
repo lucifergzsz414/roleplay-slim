@@ -89,9 +89,18 @@ LAUNCHER_DEPS = [
     CYRENE_INSTALLER_DIR / "patch_cyrene.py",
 ]
 LAUNCHER_HIDDEN_IMPORTS = ["install", "patch_bandori", "patch_cyrene"]
+SECURITY_HELPER_IMPORTS = ["safe_process", "credential_store"]
 LAUNCHER_EXE_NAME = "roleplay-slim启动器.exe"
 LAUNCHER_ZIP_NAME = "roleplay-slim启动器.zip"
 LAUNCHER_README_SRC = ROOT / "使用说明_启动器.txt"
+LAUNCHER_ASSETS = ROOT.parent / "launcher" / "assets"
+LAUNCHER_ICON = LAUNCHER_ASSETS / "app.ico"
+# Tk reads both resources at runtime.  The ICO keeps Windows titlebar/taskbar
+# rendering crisp at every size; the PNG is used inside the branded header.
+LAUNCHER_EXTRA_DATA = [
+    (LAUNCHER_ASSETS / "app.ico", "assets"),
+    (LAUNCHER_ASSETS / "app_header.png", "assets"),
+]
 
 
 def pyinstaller_available() -> bool:
@@ -123,10 +132,17 @@ def run(cmd: list[str], **kwargs) -> None:
 def _build_tk_exe(
     source: Path, name: str, exe_name: str, workdir_suffix: str,
     deps: list[Path], hidden_import: str | list[str],
+    icon: Path | None = None,
+    extra_data: list[tuple[Path, str]] | None = None,
 ) -> Path:
     """Shared PyInstaller invocation for the tkinter GUIs (installer,
     uninstaller, and their BandoriPet counterparts) — all of them bundle a
-    single patch-logic module the same way."""
+    single patch-logic module the same way.
+
+    `icon` sets the .exe's own icon (what Explorer and the taskbar show).
+    `extra_data` bundles further files as (source, destination-subdir) —
+    the launcher needs its in-window PNG this way, since a frozen app can't
+    read anything that wasn't shipped inside it."""
     step(f"Building {exe_name}")
     DIST.mkdir(exist_ok=True)
 
@@ -145,6 +161,7 @@ def _build_tk_exe(
         "--workpath", str(workpath),
         "--specpath", str(specpath),
         "--noconsole",
+        "--paths", str(ROOT),
     ]
 
     # Ensure the patch-logic module is included (runtime sys.path insertion
@@ -164,8 +181,17 @@ def _build_tk_exe(
     # (it can patch any of the three adapted apps), the single-app installers
     # need exactly one — both spellings accepted so neither has to carry a
     # one-element list.
-    for _hidden in ([hidden_import] if isinstance(hidden_import, str) else hidden_import):
+    requested_hidden_imports = (
+        [hidden_import] if isinstance(hidden_import, str) else hidden_import
+    )
+    for _hidden in [*requested_hidden_imports, *SECURITY_HELPER_IMPORTS]:
         cmd.extend(["--hidden-import", _hidden])
+
+    if icon is not None and icon.is_file():
+        cmd.extend(["--icon", str(icon)])
+    for src, dest_dir in (extra_data or []):
+        if src.is_file():
+            cmd.extend(["--add-data", f"{src}{os.pathsep}{dest_dir}"])
 
     cmd.append(str(source))
 
@@ -235,6 +261,7 @@ def build_launcher() -> Path:
     return _build_tk_exe(
         LAUNCHER_SRC, "roleplay-slim启动器", LAUNCHER_EXE_NAME,
         "launcher", LAUNCHER_DEPS, LAUNCHER_HIDDEN_IMPORTS,
+        icon=LAUNCHER_ICON, extra_data=LAUNCHER_EXTRA_DATA,
     )
 
 
@@ -243,7 +270,6 @@ def build_proxy() -> Path:
     step("Building roleplay-slim-proxy.exe")
     DIST.mkdir(exist_ok=True)
 
-    output = DIST / PROXY_EXE_NAME
     workpath = DIST / "_build_proxy"
     specpath = DIST / "_build_proxy"
 

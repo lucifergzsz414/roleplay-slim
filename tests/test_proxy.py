@@ -11,6 +11,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+import roleplay_slim.proxy.server as proxy_server
 from roleplay_slim.config import CompressorConfig, ProxyConfig, StatsConfig
 from roleplay_slim.proxy.server import create_app
 
@@ -106,6 +107,28 @@ def test_chat_completions_sends_compressed_messages_upstream():
     assert footer_count == 1
     # fewer messages reached upstream than were sent in (something got compressed)
     assert len(sent_messages) < len(_sample_body()["messages"])
+    # A blank override remains fully backwards-compatible.
+    assert captured["body"]["model"] == "test-model"
+
+
+def test_chat_completions_uses_configured_upstream_model():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    config = ProxyConfig(
+        upstream_model="qwen3.6-plus",
+        compressor=CompressorConfig(keep_recent_turns=1),
+        stats=StatsConfig(persist=False),
+    )
+    client = _make_client(handler, config)
+
+    response = client.post("/v1/chat/completions", json=_sample_body())
+
+    assert response.status_code == 200
+    assert captured["body"]["model"] == "qwen3.6-plus"
 
 
 def test_chat_completions_updates_stats():
@@ -272,9 +295,9 @@ def test_streaming_usage_survives_a_line_split_across_network_chunks():
     async def stream_gen():
         # Split both a plain-ASCII JSON line AND a multi-byte UTF-8
         # character (in "内" = E5 86 85) across chunk boundaries.
-        yield 'data: {"choices": [{"delta": {"content": "五'.encode("utf-8")
-        yield "内".encode("utf-8")[:1]  # first byte of a 3-byte UTF-8 char
-        yield "内".encode("utf-8")[1:] + '"}}]}\n\n'.encode("utf-8")
+        yield 'data: {"choices": [{"delta": {"content": "五'.encode()
+        yield "内".encode()[:1]  # first byte of a 3-byte UTF-8 char
+        yield "内".encode()[1:] + b'"}}]}\n\n'
         yield b'data: {"choices": [], "usage": {"prompt_tokens": 7, '
         yield b'"completion_tokens": 2}}\n\n'
         yield b"data: [DONE]\n\n"
@@ -287,7 +310,7 @@ def test_streaming_usage_survives_a_line_split_across_network_chunks():
         body = b"".join(resp.iter_bytes())
 
     # Forwarding must still be byte-perfect despite the mid-character split.
-    assert "五内".encode("utf-8") in body
+    assert "五内".encode() in body
 
     stats = client.get("/stats").json()
     assert stats["upstream"]["completion_tokens_total"] == 2
@@ -1122,6 +1145,79 @@ def test_anthropic_route_forwards_to_correct_upstream_path_and_headers():
     assert captured["x-api-key"] == "sk-configured"
     assert captured["anthropic-version"] == "2023-06-01"
     assert captured["authorization"] is None  # never forwards Authorization on this route
+
+
+def test_anthropic_route_retries_transient_connect_failure(monkeypatch):
+    monkeypatch.setattr(proxy_server, "_CONNECT_RETRY_DELAYS", (0.0, 0.0))
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("temporary connection reset", request=request)
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+
+    client = _make_anthropic_client(handler)
+    resp = client.post("/v1/messages", json=_anthropic_body())
+
+    assert resp.status_code == 200
+    assert attempts == 2
+
+
+def test_anthropic_stream_retries_transient_connect_failure(monkeypatch):
+    monkeypatch.setattr(proxy_server, "_CONNECT_RETRY_DELAYS", (0.0, 0.0))
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectTimeout("temporary TLS timeout", request=request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=b'data: {"type":"message_stop"}\n\n',
+        )
+
+    client = _make_anthropic_client(handler)
+    resp = client.post("/v1/messages", json=_anthropic_body(stream=True))
+
+    assert resp.status_code == 200
+    assert resp.content == b'data: {"type":"message_stop"}\n\n'
+    assert attempts == 2
+
+
+def test_anthropic_route_stops_after_bounded_connect_retries(monkeypatch):
+    monkeypatch.setattr(proxy_server, "_CONNECT_RETRY_DELAYS", (0.0, 0.0))
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ConnectError("still unavailable", request=request)
+
+    client = _make_anthropic_client(handler)
+    resp = client.post("/v1/messages", json=_anthropic_body())
+
+    assert resp.status_code == 502
+    assert attempts == 3
+
+
+def test_anthropic_route_does_not_retry_after_connection_is_established(monkeypatch):
+    monkeypatch.setattr(proxy_server, "_CONNECT_RETRY_DELAYS", (0.0, 0.0))
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ReadError("response reset after request was sent", request=request)
+
+    client = _make_anthropic_client(handler)
+    resp = client.post("/v1/messages", json=_anthropic_body())
+
+    assert resp.status_code == 502
+    assert attempts == 1
 
 
 def test_anthropic_route_client_supplied_api_key_wins():
