@@ -16,11 +16,29 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-[English](README.md) · 新手上路？看 [QUICKSTART.md](QUICKSTART.md)（[英文版](QUICKSTART.md)），
+[English](README.md) · 新手上路？看 [QUICKSTART_CN.md](QUICKSTART_CN.md)（[英文版](QUICKSTART.md)），
 零基础也能跑起来。
 
 > **500 轮角色扮演对话** — 37,176 → 19,545 tokens（省 47.4%），
 > persona 前缀 100% 保留。[见性能测试](#性能测试) · [30 秒上手](#30-秒上手)
+
+## Windows 图形版（无需安装 Python）
+
+[下载最新 Windows 测试版](https://github.com/lucifergzsz414/roleplay-slim/releases/tag/universal-windows-beta-2026-10-08) ·
+[直接下载 ZIP](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-08/roleplay-slim-windows-x64.zip) ·
+[SHA-256 校验文件](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-08/roleplay-slim-windows-x64.zip.sha256)
+
+![roleplay-slim Windows 启动器](docs/images/windows-launcher.png)
+
+1. 下载 ZIP，并完整解压到一个新目录。
+2. 双击 `roleplay-slim启动器.exe`，选择实际使用的模型服务商。
+3. 将界面中的本地 API 地址复制到聊天软件的“API 地址”栏。
+4. 点击“开始整理”，保持启动器窗口打开，然后照常聊天。
+
+API Key 仍由原聊天软件管理，启动器不会读取或保存它。代理默认只监听
+`127.0.0.1`，不会修改系统代理、hosts、防火墙或注册表。当前测试版尚未进行
+Windows 代码签名，首次运行时可能出现 SmartScreen 提示；请只从本项目的
+GitHub Release 下载，并先核对 SHA-256。
 
 ## 问题
 
