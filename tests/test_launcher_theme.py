@@ -4,6 +4,7 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
 import tomllib
 from PIL import Image
 
@@ -147,6 +148,18 @@ def test_upstream_url_is_normalized() -> None:
     assert _validate_upstream_url(" https://api.deepseek.com/v1/ ") == (
         "https://api.deepseek.com/v1"
     )
+
+
+def test_upstream_url_allows_http_only_for_loopback() -> None:
+    assert _validate_upstream_url("http://127.0.0.1:8000/v1") == (
+        "http://127.0.0.1:8000/v1"
+    )
+    assert _validate_upstream_url("http://localhost:8000/v1") == (
+        "http://localhost:8000/v1"
+    )
+
+    with pytest.raises(ValueError, match="HTTPS"):
+        _validate_upstream_url("http://api.example.com/v1")
 
 
 def test_upstream_url_rejects_toml_injection_and_credentials() -> None:

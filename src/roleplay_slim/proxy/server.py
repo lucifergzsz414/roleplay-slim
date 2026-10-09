@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from ..anthropic_proxy import (
     compress_anthropic_messages,
-    estimate_anthropic_messages_chars,
+    estimate_anthropic_messages_tokens,
 )
 from ..compressor import compress
 from ..config import ProxyConfig
@@ -244,12 +244,21 @@ def _map_anthropic_usage(usage: dict) -> dict:
     else that had to be processed fresh (`input_tokens +
     cache_creation_input_tokens`).
     """
-    input_tokens = usage.get("input_tokens") or 0
-    cache_creation = usage.get("cache_creation_input_tokens") or 0
-    cache_read = usage.get("cache_read_input_tokens") or 0
+    def safe_count(value: object) -> int:
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, int):
+            return max(0, value)
+        if isinstance(value, float):
+            return max(0, int(value))
+        return 0
+
+    input_tokens = safe_count(usage.get("input_tokens"))
+    cache_creation = safe_count(usage.get("cache_creation_input_tokens"))
+    cache_read = safe_count(usage.get("cache_read_input_tokens"))
     return {
         "prompt_tokens": input_tokens + cache_creation + cache_read,
-        "completion_tokens": usage.get("output_tokens"),
+        "completion_tokens": safe_count(usage.get("output_tokens")),
         "prompt_cache_hit_tokens": cache_read,
         "prompt_cache_miss_tokens": input_tokens + cache_creation,
     }
@@ -689,28 +698,28 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                 status_code=500,
             )
 
-        before_chars = estimate_anthropic_messages_chars(messages)
-        after_chars = estimate_anthropic_messages_chars(compressed)
-        pct = (before_chars - after_chars) / before_chars * 100 if before_chars else 0.0
+        before_tokens = estimate_anthropic_messages_tokens(messages)
+        after_tokens = estimate_anthropic_messages_tokens(compressed)
+        pct = (
+            (before_tokens - after_tokens) / before_tokens * 100
+            if before_tokens
+            else 0.0
+        )
         logger.info(
-            "anthropic request #%d | %d -> %d chars (saved %.1f%%) | msgs:%d",
+            "anthropic request #%d | %d -> %d estimated tokens (saved %.1f%%) | msgs:%d",
             stats.request_count + 1,
-            before_chars,
-            after_chars,
+            before_tokens,
+            after_tokens,
             pct,
             len(messages),
         )
-        # record_raw (not record()) — these are raw char counts, not
-        # OpenAI-shaped messages, so nothing here should be re-estimated via
-        # a tokenizer that assumes string/text-block content. Recorded
-        # through the same tokens_before/after columns the OpenAI route
-        # uses; stats.summary()'s percentage math is unit-agnostic (only
-        # ever computes before/after ratios), so this is honest as long as
-        # the two routes' numbers are never compared as if they were the
-        # same unit (chars vs. tokens).
+        # Both protocol routes persist the same estimated-token unit, so
+        # their totals remain meaningful when one process handles both.
         _req_model = body.get("model")
         entry = stats.record_raw(
-            before_chars, after_chars, model=_req_model if isinstance(_req_model, str) else None
+            before_tokens,
+            after_tokens,
+            model=_req_model if isinstance(_req_model, str) else None,
         )
         body["messages"] = compressed
 
@@ -780,7 +789,8 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                             continue
                         etype = event.get("type")
                         if etype == "message_start":
-                            usage = event.get("message", {}).get("usage")
+                            message = event.get("message")
+                            usage = message.get("usage") if isinstance(message, dict) else None
                             if isinstance(usage, dict):
                                 usage_acc.update(usage)
                         elif etype == "message_delta":
@@ -797,7 +807,14 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
                         if isinstance(usage, dict):
                             usage_acc.update(usage)
                 if usage_acc:
-                    _record_usage_dict(stats, _map_anthropic_usage(usage_acc), entry["id"])
+                    try:
+                        mapped_usage = _map_anthropic_usage(usage_acc)
+                        _record_usage_dict(stats, mapped_usage, entry["id"])
+                    except Exception:
+                        logger.warning(
+                            "ignored malformed Anthropic usage telemetry",
+                            exc_info=True,
+                        )
                 await resp.aclose()
 
         resp_headers = {

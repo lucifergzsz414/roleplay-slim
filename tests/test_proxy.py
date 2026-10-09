@@ -12,8 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 import roleplay_slim.proxy.server as proxy_server
+from roleplay_slim.anthropic_proxy import estimate_anthropic_messages_tokens
 from roleplay_slim.config import CompressorConfig, ProxyConfig, StatsConfig
 from roleplay_slim.proxy.server import create_app
+from roleplay_slim.stats import estimate_messages_tokens
 
 FOOTER = "[FORMAT RULE] end with a tag"
 
@@ -1372,3 +1374,48 @@ def test_anthropic_route_streaming_forwards_bytes_unchanged():
     with client.stream("POST", "/v1/messages", json=_anthropic_body(stream=True)) as resp:
         received = b"".join(resp.iter_bytes())
     assert received == b"".join(raw_chunks)
+
+
+def test_anthropic_stream_ignores_malformed_usage_without_breaking_forwarding():
+    raw = (
+        b'event: message_start\n'
+        b'data: {"type":"message_start","message":{"usage":{"input_tokens":"bad"}}}\n\n'
+        b'event: message_delta\n'
+        b'data: {"type":"message_delta","usage":{"output_tokens":true}}\n\n'
+    )
+
+    client = _make_anthropic_client(
+        lambda _request: httpx.Response(
+            200, content=raw, headers={"content-type": "text/event-stream"}
+        )
+    )
+    with client.stream("POST", "/v1/messages", json=_anthropic_body(stream=True)) as resp:
+        received = b"".join(resp.iter_bytes())
+
+    assert received == raw
+
+
+def test_openai_and_anthropic_requests_share_one_token_unit_in_stats() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"content": []})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    config = ProxyConfig(
+        anthropic_upstream_base_url="https://example.test/anthropic/v1",
+        compressor=CompressorConfig(keep_recent_turns=1),
+        stats=StatsConfig(persist=False),
+    )
+    client = _make_client(handler, config)
+    openai_body = _sample_body()
+    anthropic_body = _anthropic_body()
+
+    client.post("/v1/chat/completions", json=openai_body)
+    client.post("/v1/messages", json=anthropic_body)
+    summary = client.get("/stats").json()
+
+    assert summary["request_count"] == 2
+    assert summary["tokens_before_total"] == (
+        estimate_messages_tokens(openai_body["messages"])
+        + estimate_anthropic_messages_tokens(anthropic_body["messages"])
+    )

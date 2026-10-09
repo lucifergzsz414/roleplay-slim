@@ -7,6 +7,7 @@ from __future__ import annotations
 from roleplay_slim.anthropic_proxy import (
     compress_anthropic_messages,
     estimate_anthropic_messages_chars,
+    estimate_anthropic_messages_tokens,
     trim_old_tool_results,
 )
 
@@ -57,6 +58,21 @@ def test_estimate_chars_ignores_non_list_content_gracefully():
     assert estimate_anthropic_messages_chars(messages) == len("plain string")
 
 
+def test_estimate_tokens_uses_the_shared_token_unit() -> None:
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "hello world"}]},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "input": {"path": "example.py"}},
+            ],
+        },
+    ]
+
+    assert estimate_anthropic_messages_tokens(messages) > 0
+    assert estimate_anthropic_messages_tokens([]) == 0
+
+
 def test_trim_replaces_tool_result_only_in_older_turns():
     messages = []
     messages += _turn("q1", "tool_1", "BIG OLD OUTPUT " * 50, "a1")
@@ -97,6 +113,19 @@ def test_trim_keep_recent_turns_larger_than_history_changes_nothing():
     messages = _turn("q1", "tool_1", "output", "a1")
     trimmed = trim_old_tool_results(messages, keep_recent_turns=99)
     assert trimmed == messages
+
+
+def test_multiple_tool_results_in_one_human_turn_stay_together() -> None:
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "inspect both files"}]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "first"}]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "t2", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t2", "content": "second"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "done"}]},
+    ]
+
+    assert trim_old_tool_results(messages, keep_recent_turns=1) == messages
 
 
 def test_trim_messages_with_no_tool_result_blocks_are_untouched():

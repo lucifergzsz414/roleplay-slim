@@ -114,3 +114,9 @@ def test_proxy_from_toml_accepts_an_upstream_model_override(tmp_path):
     config = ProxyConfig.from_toml(str(toml_path))
 
     assert config.upstream_model == "qwen3.6-plus"
+
+
+@pytest.mark.parametrize("value", [-1, "6", True])
+def test_proxy_rejects_invalid_anthropic_keep_recent_turns(value) -> None:
+    with pytest.raises((TypeError, ValueError), match="anthropic_keep_recent_turns"):
+        ProxyConfig(anthropic_keep_recent_turns=value)

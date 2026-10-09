@@ -237,6 +237,9 @@ def _validate_upstream_url(value: str) -> str:
         or any(ch.isspace() for ch in value)
     ):
         raise ValueError("请输入不含账号、查询参数或换行的 http/https 地址。")
+    loopback_hosts = {"localhost", "127.0.0.1", "::1"}
+    if parts.scheme == "http" and hostname.lower().rstrip(".") not in loopback_hosts:
+        raise ValueError("远程 AI 服务必须使用 HTTPS；HTTP 仅限本机地址。")
     return value
 
 

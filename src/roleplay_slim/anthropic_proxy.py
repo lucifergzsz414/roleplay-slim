@@ -26,13 +26,15 @@ ships **only** that lever for now (the Anthropic equivalent of
 see the design doc's "验证" section for why that scope cut is deliberate,
 not a shortcut.
 
-`segmenter.split_into_turns` is reused as-is: it only reads `m.get("role")`
-and never touches `content`, so it works unmodified on Anthropic-shaped
-messages (which only ever carry "user"/"assistant" roles).
+Anthropic tool callbacks also use `role="user"`, so this module keeps its own
+small turn splitter: tool-result-only messages stay with the human request
+that initiated them, while the next user text/image message starts a new turn.
 """
 from __future__ import annotations
 
-from .segmenter import split_into_turns
+import json
+
+from .stats import estimate_tokens
 
 _TOOL_RESULT_PLACEHOLDER = "[older tool output omitted by roleplay-slim]"
 
@@ -55,8 +57,6 @@ def _block_text_len(block: dict) -> int:
         # tool_result content can itself be a block list (rare, but valid)
         return sum(_block_text_len(b) for b in content) if isinstance(content, list) else 0
     if btype == "tool_use":
-        import json
-
         return len(json.dumps(block.get("input", {})))
     return 0
 
@@ -76,33 +76,86 @@ def estimate_anthropic_messages_chars(messages: list[dict]) -> int:
     return total
 
 
+def _block_token_count(block: dict) -> int:
+    if not isinstance(block, dict):
+        return 0
+    btype = block.get("type")
+    if btype == "text":
+        return estimate_tokens(str(block.get("text", "")))
+    if btype == "tool_result":
+        content = block.get("content", "")
+        if isinstance(content, str):
+            return estimate_tokens(content)
+        if isinstance(content, list):
+            return sum(_block_token_count(item) for item in content)
+        return 0
+    if btype == "tool_use":
+        payload = json.dumps(block.get("input", {}), ensure_ascii=False)
+        return estimate_tokens(payload)
+    return 0
+
+
+def estimate_anthropic_messages_tokens(messages: list[dict]) -> int:
+    """Estimate Anthropic message content in the same token unit as OpenAI."""
+    total = 0
+    for message in messages:
+        content = message.get("content", "")
+        if isinstance(content, str):
+            total += estimate_tokens(content)
+        elif isinstance(content, list):
+            total += sum(_block_token_count(block) for block in content)
+    return total
+
+
+def _is_tool_result_message(message: dict) -> bool:
+    content = message.get("content")
+    return (
+        message.get("role") == "user"
+        and isinstance(content, list)
+        and bool(content)
+        and all(
+            isinstance(block, dict) and block.get("type") == "tool_result"
+            for block in content
+        )
+    )
+
+
+def _split_anthropic_turns(messages: list[dict]) -> list[list[dict]]:
+    """Group tool-result callbacks with the human turn that initiated them."""
+    turns: list[list[dict]] = []
+    for message in messages:
+        starts_human_turn = (
+            message.get("role") == "user" and not _is_tool_result_message(message)
+        )
+        if not turns or starts_human_turn:
+            turns.append([])
+        turns[-1].append(message)
+    return turns
+
+
 def trim_old_tool_results(messages: list[dict], keep_recent_turns: int) -> list[dict]:
     """Replace `tool_result` block content in every turn older than the most
     recent `keep_recent_turns` with a short placeholder. Everything else
     (text blocks, tool_use blocks, and all content within the kept recent
     turns) passes through untouched.
 
-    A "turn" here is the same unit `segmenter.split_into_turns` already
-    defines: starts at a `user` message, includes everything up to (not
-    including) the next `user` message. For a tool round trip that means a
-    turn can contain more than 2 messages (user question -> assistant
-    tool_use -> user tool_result -> ... -> assistant final reply all before
-    the next real user message), which is exactly the shape whose tool
-    output this function targets.
+    A turn starts at a human `user` message. `user` messages containing only
+    `tool_result` blocks remain in that same turn, including chained tool
+    calls, until the next user text/image message begins a new human turn.
     """
     if keep_recent_turns <= 0:
-        turns = split_into_turns(messages)
+        turns = _split_anthropic_turns(messages)
         keep_from = len(turns)
     else:
-        turns = split_into_turns(messages)
+        turns = _split_anthropic_turns(messages)
         keep_from = max(0, len(turns) - keep_recent_turns)
 
     out: list[dict] = []
     for i, turn in enumerate(turns):
         if i >= keep_from:
-            out.extend(turn.messages)
+            out.extend(turn)
             continue
-        for m in turn.messages:
+        for m in turn:
             content = m.get("content")
             if not isinstance(content, list):
                 out.append(m)
@@ -131,5 +184,6 @@ def compress_anthropic_messages(messages: list[dict], keep_recent_turns: int) ->
 __all__ = [
     "compress_anthropic_messages",
     "estimate_anthropic_messages_chars",
+    "estimate_anthropic_messages_tokens",
     "trim_old_tool_results",
 ]

@@ -293,6 +293,18 @@ class ProxyConfig:
     # settings the moment either strategy set changes.
     anthropic_keep_recent_turns: int = 6
 
+    def __post_init__(self) -> None:
+        value = self.anthropic_keep_recent_turns
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(
+                "anthropic_keep_recent_turns must be an integer, "
+                f"got {type(value).__name__}"
+            )
+        if value < 0:
+            raise ValueError(
+                f"anthropic_keep_recent_turns must be >= 0, got {value}"
+            )
+
     @classmethod
     def from_toml(cls, path: str | Path) -> ProxyConfig:
         with open(path, "rb") as f:

@@ -104,12 +104,11 @@ class StatsStore:
         their own before/after size numbers and must not have this class
         re-derive them via `estimate_messages_tokens` (which assumes
         OpenAI-shaped `content` — a string or a list of `{"type": "text"}`
-        blocks). The Anthropic route's char-based accounting is exactly
-        this case: routing it through `record()` with a synthetic message
-        would silently re-estimate a *different* number (tiktoken run over
-        placeholder characters, not the real char count), corrupting the
-        exact figures this project's stats claims are supposed to be built
-        on. Column semantics are otherwise identical to `record()`'s.
+        blocks). The Anthropic route computes the equivalent estimated-token
+        count from its own block types before calling this method. Routing it
+        through `record()` with synthetic OpenAI messages would re-estimate a
+        different payload. Column semantics and units are otherwise identical
+        to `record()`'s.
         """
         cursor = self._conn.execute(
             "INSERT INTO requests (ts, tokens_before, tokens_after, model) VALUES (?, ?, ?, ?)",
