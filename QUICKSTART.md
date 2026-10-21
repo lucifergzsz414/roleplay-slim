@@ -62,10 +62,12 @@ keep_recent_turns = 3
 enable_strip_stage_directions = false
 ```
 
-You don't need to understand every field to get started — these defaults
-are sane for most chat apps. The one to actually think about is
-`keep_recent_turns`: it's how many of the most recent exchanges get sent
-completely untouched.
+The default `history_window_mode="preserve"` retains complete dialogue.
+`keep_recent_turns` sets the protected window only for opt-in lossy strategies.
+Existing explicit `trim` configs are not migrated. Only updated source supports
+`preserve`; old binaries reject that value. For old versions, disable history
+window and action stripping and remove token budgets instead. With no redundant
+content, the default may save no tokens.
 
 ## 5. Start it up
 

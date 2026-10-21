@@ -56,13 +56,14 @@ class CompressorConfig:
     enable_strip_stage_directions: bool = False
 
     # What happens to turns older than keep_recent_turns when
-    # enable_history_window is on: "drop" removes them outright (appropriate
+    # enable_history_window is on: "preserve" keeps complete history (default).
+    # Lossy modes are explicit opt-ins: "drop" removes turns outright (appropriate
     # for apps that already inject a
     # separate persistent-memory summary elsewhere); "trim" keeps a short
     # extractive stub (first + last sentence) instead of dropping entirely;
     # "summarize" hands them to the `summarizer` callback below and replaces
     # the whole block with its single returned message.
-    history_window_mode: str = "trim"  # "trim" | "drop" | "summarize"
+    history_window_mode: str = "preserve"  # "preserve" | "trim" | "drop" | "summarize"
 
     # Optional callback that condenses the aged-out portion of the history.
     # Receives the messages of every turn older than keep_recent_turns and
@@ -80,9 +81,9 @@ class CompressorConfig:
     # output is far better than anything a regex could produce.
     #
     # Python-only by nature (a callable cannot come from TOML). Returning
-    # an empty string means "this history isn't worth keeping" and drops
-    # the block. Raising is survivable: the failure is logged and the
-    # block falls back to "trim" — this callback is usually a network call
+    # an empty string is treated as a failed summary, preserving the original
+    # block. Raising is survivable: the failure is logged and the
+    # original block is preserved — this callback is usually a network call
     # to an LLM, and a proxy handling a live request must not fail just
     # because the summarizer timed out.
     summarizer: Callable[[list[dict]], str] | None = None
@@ -145,9 +146,9 @@ class CompressorConfig:
     def __post_init__(self) -> None:
         if self.keep_recent_turns < 0:
             raise ValueError(f"keep_recent_turns must be >= 0, got {self.keep_recent_turns}")
-        if self.history_window_mode not in ("trim", "drop", "summarize"):
+        if self.history_window_mode not in ("preserve", "trim", "drop", "summarize"):
             raise ValueError(
-                'history_window_mode must be "trim", "drop" or "summarize", '
+                'history_window_mode must be "preserve", "trim", "drop" or "summarize", '
                 f"got {self.history_window_mode!r}"
             )
         if self.history_window_mode == "summarize" and self.summarizer is None:
@@ -292,8 +293,13 @@ class ProxyConfig:
     # compressor.keep_recent_turns would silently couple two unrelated
     # settings the moment either strategy set changes.
     anthropic_keep_recent_turns: int = 6
+    # Replacing old tool output can remove facts still needed later. Opt in
+    # explicitly; merely enabling the Anthropic route must not discard it.
+    anthropic_trim_tool_results: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.anthropic_trim_tool_results, bool):
+            raise TypeError("anthropic_trim_tool_results must be a boolean")
         value = self.anthropic_keep_recent_turns
         if isinstance(value, bool) or not isinstance(value, int):
             raise TypeError(
@@ -316,6 +322,7 @@ class ProxyConfig:
             "upstream_base_url", "upstream_model", "upstream_api_key_env", "host", "port",
             "client_auth_token_env", "client_auth_tokens_extra",
             "anthropic_upstream_base_url", "anthropic_keep_recent_turns",
+            "anthropic_trim_tool_results",
         }
         unknown = set(proxy_section) - known
         if unknown:

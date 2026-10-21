@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import logging
 
+from .. import __version__
 from ..config import ProxyConfig
 from .server import create_app
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="roleplay-slim-proxy")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", help="Path to a TOML config file", default=None)
     parser.add_argument("--port", type=int, default=None, help="Override config port")
     parser.add_argument("--host", default=None, help="Override config host")

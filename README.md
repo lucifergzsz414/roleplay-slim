@@ -24,15 +24,22 @@ every request**.
 [QUICKSTART.md](QUICKSTART.md) ([中文版](QUICKSTART_CN.md)) — no prior
 experience assumed.
 
-> **500 turns later, the character still remembers who they are.**
-> 37,176 → 19,545 tokens (47.4% less). Persona prefix never touched.
-> [See the proof](#benchmarks) · [Try it in 30s](#30-second-tryout)
+> **Preserve facts by default.** Current source defaults to `history_window_mode="preserve"`,
+> not first/last-sentence trimming. The historical 47.4% figure below used lossy settings;
+> it is not a current-default savings or memory-retention guarantee.
+> [Live-model findings and fix boundaries](docs/dsh-live-fidelity-20261021.md)
 
 ## Windows GUI beta (no Python required)
 
-[Open the latest Windows beta](https://github.com/lucifergzsz414/roleplay-slim/releases/tag/universal-windows-beta-2026-10-08) ·
-[Download the ZIP](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-08/roleplay-slim-windows-x64.zip) ·
-[SHA-256 checksum](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-08/roleplay-slim-windows-x64.zip.sha256)
+The 0.5.0 universal binary includes the fact-retention fix. Close the old launcher
+and extract the complete new ZIP into a new directory. Do not overwrite its defaults
+with an old config. Keep the old directory for rollback. Explicit `trim` configs
+are not migrated; old binaries reject the new `preserve` value. This change covers the library,
+proxy and universal launcher, not the pet-specific installers.
+
+[Open the latest Windows beta](https://github.com/lucifergzsz414/roleplay-slim/releases/tag/universal-windows-beta-2026-10-21) ·
+[Download the ZIP](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-21/roleplay-slim-windows-x64.zip) ·
+[SHA-256 checksum](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-21/roleplay-slim-windows-x64.zip.sha256)
 
 ![roleplay-slim Windows launcher](docs/images/windows-launcher.png)
 
@@ -61,8 +68,8 @@ flowchart LR
     subgraph WITH["With roleplay-slim"]
         direction TB
         S1["Persona — cached forever"] --> S3["Cache hits every request"]
-        S2["History — compressed"] --> S4["~47% fewer tokens"]
-        S3 --> S5["Character stays the same"]
+        S2["History — preserved by default"] --> S4["Savings depend on redundancy"]
+        S3 --> S5["Prefix stays unchanged"]
         S4 --> S5
     end
     WITHOUT -.->|"same conversation"| WITH
@@ -187,7 +194,7 @@ semantic scoring)
 |---|---|---|
 | `whitespace_normalize` | Collapses redundant blank lines/whitespace | on |
 | `dedupe_verbatim_tail` | If the exact same footer/reminder text repeats across turns, keeps only the last copy | on |
-| `history_window` | Keeps the most recent N turns verbatim; older turns get dropped, trimmed to a first+last-sentence stub, or handed to your own summarizer | on |
+| `history_window` | Preserves complete dialogue by default; trim, drop and summarize are lossy opt-ins | `preserve` |
 | `strip_stage_directions` | Removes parenthetical/action-description text (`（…）`, `*…*`, whatever your app uses) from *older* turns only, keeping actual dialogue intact — the differentiator | off (format-sensitive, opt-in) |
 | `max_prompt_tokens` | Hard ceiling on the whole prompt: drops the oldest turns until the estimate fits | off (opt-in) |
 
@@ -259,9 +266,9 @@ Your callback is allowed to fail. It's usually a network call:
 
 | Your callback | What happens |
 |---|---|
-| Raises (timeout, API error) | Logged, falls back to `trim`. The request still goes through. |
-| Returns `""` | Read as "this history isn't worth keeping" — the block is dropped |
-| Returns a non-string | Logged, falls back to `trim` |
+| Raises (timeout, API error) | Logged; original history retained. The request still goes through. |
+| Returns empty or whitespace-only text | Treated as failure; original history retained |
+| Returns a non-string | Logged; original history retained |
 | Nothing has aged out yet | Not called at all — no spending a request to summarize an empty block |
 
 Python-only by nature: a callable can't come from TOML, so setting
@@ -270,6 +277,10 @@ failing later inside compression.
 
 ## Benchmarks
 
+These are historical measurements with the old trim/action-stripping settings,
+not measurements of the current `preserve` default. With no redundant reminders
+or whitespace, preserving dialogue can save zero tokens.
+
 Take a 500-turn roleplay conversation — persona prefix, Chinese dialogue
 with stage directions, repeated per-turn footers. That's 37,176 tokens
 going to the LLM on every request.
@@ -277,15 +288,15 @@ going to the LLM on every request.
 | Config | Tokens after | Saved |
 |---|---|---|
 | No compression | 37,176 | — |
-| Default (zero tuning) | 31,041 | 16.5% |
+| Legacy default (trim) | 31,041 | 16.5% |
 | + stage-direction stripping | 19,545 | **47.4%** |
 
-The persona prefix is never touched — the 47% comes entirely from the
-dialogue history, where it doesn't change how the character talks.
+The persona prefix is never touched. That does not mean lossy dialogue
+processing preserves memory, relationships or the character's way of speaking.
 
 The same pattern holds across conversation lengths:
 
-| Turns | Before | Default | + strip |
+| Turns | Before | Legacy trim | + strip |
 |---|---|---|---|
 | 50 | 3,966 | 3,366 (15.1%) | 2,355 **(40.6%)** |
 | 200 | 15,036 | 12,591 (16.3%) | 8,085 **(46.2%)** |
@@ -330,27 +341,20 @@ no GUI.
 
 ---
 
-### `history_window`'s trim mode assumes you have (or don't need) memory elsewhere
+### Preserve dialogue by default; lossy compression is opt-in
 
 `trim` keeps a naive first+last-sentence stub of older turns — it has no
 concept of which sentence matters. A promise or commitment buried in the
 *middle* of an older message ("下次给你带一束花" in the middle of a longer
 message about the weather) can end up in the dropped middle section.
 
-This is a deliberate scope boundary, not an oversight: roleplay-slim is a
-token compressor, not a memory system, and it has no way to know which
-sentence in your app's specific domain is the important one without either
-an LLM call (which the v0.2 rule-based boundary above rules out) or a
-fragile keyword heuristic (high false-negative rate, especially outside
-English). If your app doesn't have its own long-term memory/fact-extraction
-layer sitting *before* compression runs, either:
-
-- switch to `history_window_mode="drop"` and rely on `keep_recent_turns`
-  alone (no partial-content risk, just a harder cutoff), or
-- extract anything that must never be lost (promises, key facts, relationship
-  state) into your own persistent store *before* calling `compress()` —
-  `history_window_mode="drop"` is exactly the mode meant to pair with an app
-  that already does this (see `examples/example_config.toml`'s comment).
+The default is now `history_window_mode="preserve"`: complete dialogue and unique
+memory blocks are retained. Whitespace cleanup and duplicate-reminder removal still
+apply; this is not byte-for-byte lossless encoding or a model-recall guarantee.
+`drop` deletes entire turns and is not a remedy for fact loss. Successful summaries
+may also omit facts. Action stripping, token budgets and
+`anthropic_trim_tool_results=true` are lossy opt-ins too. Failed, empty or invalid
+summaries retain the original history rather than silently falling back to trimming.
 
 ### If your own prefix isn't actually static
 

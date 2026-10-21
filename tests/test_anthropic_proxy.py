@@ -145,7 +145,7 @@ def test_compress_anthropic_messages_measurably_reduces_size_for_multi_turn_tool
         messages += _turn(f"q{i}", f"tool_{i}", "BIG TOOL OUTPUT LINE\n" * 30, f"a{i}")
 
     before = estimate_anthropic_messages_chars(messages)
-    compressed = compress_anthropic_messages(messages, keep_recent_turns=1)
+    compressed = compress_anthropic_messages(messages, keep_recent_turns=1, trim_tool_results=True)
     after = estimate_anthropic_messages_chars(compressed)
 
     assert after < before

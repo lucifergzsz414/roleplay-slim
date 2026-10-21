@@ -413,6 +413,22 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
     # /stats source of truth. persist=true → SQLite file that survives
     # restarts; persist=false → the same store over ":memory:" (identical
     # output, nothing written to disk).
+    if (
+        (config.compressor.enable_history_window and config.compressor.history_window_mode != "preserve")
+        or config.compressor.enable_strip_stage_directions
+        or config.compressor.max_prompt_tokens is not None
+        or config.anthropic_trim_tool_results
+    ):
+        logger.warning(
+            "Lossy compression is explicitly enabled: history=%s, strip_actions=%s, "
+            "token_budget=%s, anthropic_tool_trim=%s. These options can remove facts; "
+            "use preserve mode with stripping, budget and tool trimming disabled "
+            "when complete history is required. Existing configs are not migrated automatically.",
+            config.compressor.history_window_mode,
+            config.compressor.enable_strip_stage_directions,
+            config.compressor.max_prompt_tokens,
+            config.anthropic_trim_tool_results,
+        )
     stats = StatsStore(":memory:" if not config.stats.persist else config.stats.db_path)
     api_key = os.environ.get(config.upstream_api_key_env, "")
     if not api_key:
@@ -687,7 +703,8 @@ def create_app(config: ProxyConfig, transport: httpx.AsyncBaseTransport | None =
 
         try:
             compressed = compress_anthropic_messages(
-                messages, config.anthropic_keep_recent_turns
+                messages, config.anthropic_keep_recent_turns,
+                trim_tool_results=config.anthropic_trim_tool_results,
             )
         except Exception:
             logger.exception(
