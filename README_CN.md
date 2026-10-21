@@ -19,14 +19,20 @@
 [English](README.md) · 新手上路？看 [QUICKSTART_CN.md](QUICKSTART_CN.md)（[英文版](QUICKSTART.md)），
 零基础也能跑起来。
 
-> **500 轮角色扮演对话** — 37,176 → 19,545 tokens（省 47.4%），
-> persona 前缀 100% 保留。[见性能测试](#性能测试) · [30 秒上手](#30-秒上手)
+> **默认先保留事实。** 当前源码使用 `history_window_mode="preserve"`，不再默认截取旧消息首尾句。
+> 下文 47.4% 是旧版有损配置的历史合成测试，不代表新默认收益或记忆保真率。
+> [真实模型发现与修复边界](docs/dsh-live-fidelity-20261021.md)
 
 ## Windows 图形版（无需安装 Python）
 
-[下载最新 Windows 测试版](https://github.com/lucifergzsz414/roleplay-slim/releases/tag/universal-windows-beta-2026-10-08) ·
-[直接下载 ZIP](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-08/roleplay-slim-windows-x64.zip) ·
-[SHA-256 校验文件](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-08/roleplay-slim-windows-x64.zip.sha256)
+0.5.0 通用版已包含事实保留修复。升级时先关闭旧启动器，将新包完整解压到新目录，
+不要用旧 `config.toml` 覆盖新版默认配置。保留旧目录即可回退；已有手动配置中的
+`trim` 不会自动迁移。旧包不认识 `preserve`，不要把新枚举填进旧包配置。
+本次修复范围是库、代理及通用启动器，不包含桌宠专用安装器。
+
+[下载最新 Windows 测试版](https://github.com/lucifergzsz414/roleplay-slim/releases/tag/universal-windows-beta-2026-10-21) ·
+[直接下载 ZIP](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-21/roleplay-slim-windows-x64.zip) ·
+[SHA-256 校验文件](https://github.com/lucifergzsz414/roleplay-slim/releases/download/universal-windows-beta-2026-10-21/roleplay-slim-windows-x64.zip.sha256)
 
 ![roleplay-slim Windows 启动器](docs/images/windows-launcher.png)
 
@@ -54,8 +60,8 @@ flowchart LR
     subgraph WITH["用 roleplay-slim"]
         direction TB
         S1["Persona — 永久缓存"] --> S3["每次命中缓存"]
-        S2["对话历史 — 智能压缩"] --> S4["省 ~47% token"]
-        S3 --> S5["角色始终保持一致"]
+        S2["对话历史 — 默认保留正文"] --> S4["收益取决于可去重内容"]
+        S3 --> S5["前缀保持不变"]
         S4 --> S5
     end
     WITHOUT -.->|"同一段对话"| WITH
@@ -167,7 +173,7 @@ roleplay-slim 的压缩策略只作用于对话部分——persona 前缀在结�
 |---|---|---|
 | `whitespace_normalize` | 合并多余的空行和空白字符 | 开 |
 | `dedupe_verbatim_tail` | 如果完全相同的 footer/提示文字在多轮中重复出现，只保留最后一次 | 开 |
-| `history_window` | 保留最近 N 轮原文不动；更早的轮次丢弃、裁剪为首尾句摘要，或交给你自己的摘要函数 | 开 |
+| `history_window` | 默认保留全部正文；`trim`、`drop`、`summarize` 是可能丢事实的主动选择 | `preserve` |
 | `strip_stage_directions` | 从*较早*的轮次中移除括号/动作描写（`（…）`、`*…*`，视你的应用而定），保留实际台词——差异化核心功能 | 关（格式敏感，需主动开启） |
 | `max_prompt_tokens` | 整个 prompt 的硬性上限：丢弃最旧的轮次直到估算值达标 | 关（需主动开启） |
 
@@ -225,9 +231,9 @@ config = CompressorConfig(
 
 | 回调行为 | 结果 |
 |---|---|
-| 抛异常（超时、API 报错） | 记日志，回退到 `trim`，请求照常发出 |
-| 返回 `""` | 视为"这段历史不值得保留"，直接丢弃该段 |
-| 返回非字符串 | 记日志，回退到 `trim` |
+| 抛异常（超时、API 报错） | 记日志，保留原始历史，请求照常发出 |
+| 返回空文本或只有空白 | 视为失败，保留原始历史 |
+| 返回非字符串 | 记日志，保留原始历史 |
 | 还没有轮次过期 | 根本不调用——不浪费一次请求去摘要空内容 |
 
 天生只能用 Python 配置：callable 无法从 TOML 产生，所以在配置文件里写
@@ -235,20 +241,23 @@ config = CompressorConfig(
 
 ## 性能测试
 
+以下为旧版 `trim` / 动作删除配置的历史测试，**不是当前 `preserve` 默认的测量值**。
+默认保留正文后，没有重复提示或空白可整理的样本可能完全不省 token。
+
 拿一个 500 轮的角色扮演对话来说——包含 persona 前缀、带舞台指示的中文对话、
 每轮重复的 footer——每次请求要向 LLM 发送 37,176 个 token。
 
 | 配置 | 压缩后 token | 节省 |
 |---|---|---|
 | 不压缩 | 37,176 | — |
-| 默认（零调参） | 31,041 | 16.5% |
+| 旧版默认（trim） | 31,041 | 16.5% |
 | + 去舞台指示 | 19,545 | **47.4%** |
 
-Persona 前缀从未被改动——47% 的节省全部来自对话历史，不影响角色的说话方式。
+Persona 前缀从未被改动；这不代表对话记忆、关系或说话方式不受有损处理影响。
 
 这个规律在不同对话长度下都成立：
 
-| 轮数 | 压缩前 | 默认 | + 去舞台指示 |
+| 轮数 | 压缩前 | 旧版 trim | + 去舞台指示 |
 |---|---|---|---|
 | 50 | 3,966 | 3,366 (15.1%) | 2,355 **(40.6%)** |
 | 200 | 15,036 | 12,591 (16.3%) | 8,085 **(46.2%)** |
@@ -291,22 +300,16 @@ ML 语义压缩、不做多服务商格式翻译（仅 OpenAI 格式——覆盖
 
 ---
 
-### `history_window` 的 trim 模式假设你有（或不需要）外部记忆
+### 默认保留正文；有损压缩必须主动选择
 
 `trim` 对较早轮次做简单的首尾句保留——但它不知道哪句话重要。一段埋在消息中间的
 承诺或关键信息（比如聊天气时夹杂的"下次给你带一束花"）可能落在被丢弃的中间部分。
 
-这是有意为之的范围边界，不是疏忽：roleplay-slim 是 token 压缩器，不是记忆系统，
-它没有办法知道在你的应用场景里哪句话是关键信息——除非调一次 LLM（v0.2
-的纯规则边界排除了这个选项）或者用一个脆弱的关鍵词启发式（误判率高，中英文
-之外更不可靠）。如果你的应用没有自己的长期记忆/事实提取层在压缩*之前*运行，
-要么：
-
-- 切换到 `history_window_mode="drop"`，只依赖 `keep_recent_turns`（没有部分内容
-  丢失的风险，只是截断更硬），要么
-- 在调用 `compress()` *之前*，把绝对不能丢失的内容（承诺、关键事实、关系状态）
-  提取到你自己的持久化存储中——`history_window_mode="drop"` 正是为配合已经做了
-  这层工作的应用而设计的（见 `examples/example_config.toml` 的注释）。
+因此当前默认使用 `history_window_mode="preserve"`，保留历史正文和独有的记忆块。
+它仍可整理空白和重复提示，但不是逐字节无损编码，也不保证模型一定回忆正确。
+`drop` 会删除整轮，**不是**修复事实损失的替代方案；`summarize` 的有效摘要也可能
+漏事实。动作删除、token 预算和 `anthropic_trim_tool_results=true` 同样是有损选择。
+摘要超时、异常、空白或格式错误时保留原文，不再偷偷回退到首尾句截取。
 
 ### 如果你的前缀其实不是静态的
 

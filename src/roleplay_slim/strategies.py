@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from copy import deepcopy
 
 from .config import CompressorConfig
 from .segmenter import Message, Turn
@@ -104,7 +105,7 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？…\.\!\?])\s*")
 
 def _extractive_trim(text: str) -> str:
     """Keep the first and last sentence, drop the middle — a cheap
-    fallback for apps with no memory/summary layer of their own.
+    lossy opt-in; never use as the default or a failed-summary fallback.
     Never returns a string *longer* than the input — a very short message
     (where the connector "……" plus the two sentences already exceeds the
     original length) is returned unchanged."""
@@ -120,14 +121,13 @@ def _summarize_old_turns(old_turns: list[Turn], config: CompressorConfig) -> lis
     config.summarizer.
 
     Returns the replacement turns, or None if the callback failed and the
-    caller should fall back to extractive trimming. An empty return from
-    the callback means "this history isn't worth keeping" and yields an
-    empty list — the block is dropped.
+    caller should preserve the original history. Empty output also counts
+    as failure, not permission to discard the selected history.
 
     The callback is user code and typically a network call to an LLM. It
     gets to fail: a proxy serving a live request must not return an error
     because summarization timed out, so any exception is logged and
-    downgraded to the trim path.
+    handled by retaining the original history.
     """
     summarizer = config.summarizer
     if summarizer is None:  # pragma: no cover - guarded by config validation
@@ -142,31 +142,35 @@ def _summarize_old_turns(old_turns: list[Turn], config: CompressorConfig) -> lis
         old_messages.extend(turn.messages)
 
     try:
-        summary = summarizer(old_messages)
+        summary = summarizer(deepcopy(old_messages))
     except Exception:
         logger.exception(
             "summarizer raised while condensing %d aged-out message(s); "
-            "falling back to extractive trim for this request",
+            "preserving original history for this request",
             len(old_messages),
         )
         return None
 
     if summary is None or not isinstance(summary, str):
         logger.warning(
-            "summarizer returned %s, expected str; falling back to extractive trim",
+            "summarizer returned %s, expected str; preserving original history",
             type(summary).__name__,
         )
         return None
 
     summary = summary.strip()
     if not summary:
-        return []
+        logger.warning("summarizer returned empty text; preserving original history")
+        return None
     return [Turn([{"role": "system", "content": summary}])]
 
 
 def history_window(turns: list[Turn], config: CompressorConfig) -> list[Turn]:
     """Leave the most recent `keep_recent_turns` turns untouched. Older
-    turns are dropped or trimmed depending on config.history_window_mode."""
+    turns are preserved by default. Trimming, dropping and summarizing
+    are explicit opt-ins that can remove facts."""
+    if config.history_window_mode == "preserve":
+        return turns
     keep_n = max(0, config.keep_recent_turns)
     if len(turns) <= keep_n:
         return turns
@@ -179,10 +183,10 @@ def history_window(turns: list[Turn], config: CompressorConfig) -> list[Turn]:
 
     if config.history_window_mode == "summarize":
         summarized = _summarize_old_turns(old_turns, config)
-        # None signals the callback failed — fall through to the extractive
-        # trim below rather than losing the history entirely.
+        # Failure must not silently switch to a lossy fallback.
         if summarized is not None:
             return summarized + recent_turns
+        return turns
 
     trimmed: list[Turn] = []
     for turn in old_turns:

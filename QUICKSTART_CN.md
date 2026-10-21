@@ -50,7 +50,11 @@ keep_recent_turns = 3
 enable_strip_stage_directions = false
 ```
 
-这些字段不用全搞懂也能先跑起来，默认值对大多数聊天应用都合适。真要留意的就一个：`keep_recent_turns`，最近几轮对话会原封不动全文发出去，这个数字管的就是"几轮"。
+默认 `history_window_mode="preserve"` 保留所有对话正文，不会截取旧消息首尾句。
+`keep_recent_turns` 只在主动选择有损历史策略时决定近期保护窗口。已有配置若写了
+`trim`，不会自动迁移。只有新源码支持 `preserve`；旧包临时关闭
+`enable_history_window`、动作删除和 token 预算，不要填入旧版本不认识的新枚举。
+没有重复内容时，默认可能不节省 token。
 
 ## 5. 启动
 

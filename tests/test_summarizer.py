@@ -79,21 +79,21 @@ def test_summarizer_not_called_when_nothing_has_aged_out():
     assert calls == []
 
 
-def test_empty_summary_drops_the_block():
-    """An empty return means "this history isn't worth keeping"."""
+def test_empty_summary_preserves_the_block():
+    """Empty output is a failed summary, not permission to delete facts."""
     out = compress(_conversation(10), _config(lambda msgs: ""))
 
     assert out[0] == PREFIX
     assert not any(m["content"] == "" for m in out)
-    assert [m["content"] for m in out if m["role"] == "user"] == ["question 8", "question 9"]
+    assert [m["content"] for m in out if m["role"] == "user"] == [f"question {i}" for i in range(10)]
 
 
 def test_whitespace_only_summary_is_treated_as_empty():
     out = compress(_conversation(10), _config(lambda msgs: "   \n  "))
-    assert [m["content"] for m in out if m["role"] == "user"] == ["question 8", "question 9"]
+    assert [m["content"] for m in out if m["role"] == "user"] == [f"question {i}" for i in range(10)]
 
 
-def test_summarizer_exception_falls_back_to_trim_without_raising(caplog):
+def test_summarizer_exception_preserves_history_without_raising(caplog):
     """The critical one: the callback is usually an LLM call that can time
     out, and a live request must not fail because of it."""
     def exploding(msgs):
@@ -103,12 +103,12 @@ def test_summarizer_exception_falls_back_to_trim_without_raising(caplog):
         out = compress(_conversation(10), _config(exploding))
 
     assert out[0] == PREFIX
-    # History survived via the trim path rather than vanishing.
+    # History survived intact rather than falling back to lossy trim.
     assert len([m for m in out if m["role"] == "user"]) > 2
     assert any("summarizer raised" in r.getMessage() for r in caplog.records)
 
 
-def test_summarizer_returning_non_string_falls_back_to_trim(caplog):
+def test_summarizer_returning_non_string_preserves_history(caplog):
     with caplog.at_level(logging.WARNING, logger="roleplay_slim"):
         out = compress(_conversation(10), _config(lambda msgs: {"not": "a string"}))
 
@@ -116,7 +116,7 @@ def test_summarizer_returning_non_string_falls_back_to_trim(caplog):
     assert any("expected str" in r.getMessage() for r in caplog.records)
 
 
-def test_summarizer_returning_none_falls_back_to_trim():
+def test_summarizer_returning_none_preserves_history():
     out = compress(_conversation(10), _config(lambda msgs: None))
     assert len([m for m in out if m["role"] == "user"]) > 2
 
@@ -129,7 +129,7 @@ def test_summarize_actually_shrinks_hard_to_compress_text():
         messages.append({"role": "user", "content": f"在吗 {i} " * 10})
         messages.append({"role": "assistant", "content": f"嗯 我在 {i} " * 12})
 
-    trimmed = compress(messages, CompressorConfig(keep_recent_turns=2))
+    trimmed = compress(messages, CompressorConfig(keep_recent_turns=2, history_window_mode="trim"))
     summarized = compress(messages, _config(lambda msgs: "早前聊了些日常。"))
 
     assert estimate_messages_tokens(summarized) < estimate_messages_tokens(trimmed) / 5

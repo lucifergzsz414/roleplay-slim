@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +38,32 @@ def test_universal_release_archive_uses_a_stable_ascii_name() -> None:
     assert build.LAUNCHER_ZIP_NAME == "roleplay-slim-windows-x64.zip"
     assert build.LAUNCHER_DEPS == []
     assert build.LAUNCHER_HIDDEN_IMPORTS == []
+
+
+def test_proxy_build_includes_distribution_version(tmp_path, monkeypatch):
+    build = _load_build_module()
+    captured = []
+
+    def fake_run(command):
+        captured.extend(command)
+        (tmp_path / build.PROXY_EXE_NAME).write_bytes(b"fixture executable")
+
+    monkeypatch.setattr(build, "DIST", tmp_path)
+    monkeypatch.setattr(build, "run", fake_run)
+    build.build_proxy()
+    index = captured.index("--copy-metadata")
+    assert captured[index + 1] == "roleplay-slim"
+
+
+def test_proxy_cli_version_does_not_start_a_server():
+    from roleplay_slim import __version__
+
+    result = subprocess.run(
+        [sys.executable, "-m", "roleplay_slim.proxy", "--version"],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == f"roleplay-slim-proxy {__version__}"
 
 
 def test_tk_build_only_requests_declared_hidden_imports(

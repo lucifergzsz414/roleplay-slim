@@ -246,6 +246,7 @@ def build_proxy() -> Path:
         "--hidden-import", "fastapi",
         "--hidden-import", "httpx",
         "--collect-submodules", "roleplay_slim",
+        "--copy-metadata", "roleplay-slim",
         *[f"--exclude-module={m}" for m in _proxy_exclude],
         str(PROXY_ENTRY),
     ]

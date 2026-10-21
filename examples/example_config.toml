@@ -29,14 +29,13 @@ keep_recent_turns = 6
 enable_whitespace_normalize = true
 enable_dedupe_verbatim_tail = true
 enable_history_window = true
-enable_strip_stage_directions = true
+enable_strip_stage_directions = false
 
-# "trim" keeps a first+last-sentence stub of older turns instead of
-# dropping them outright. Use "drop" if your app already injects a
-# separate persistent-memory/summary system message (many roleplay bots
-# do — dropping raw history is safe there since the summary already
-# carries the long-term facts).
-history_window_mode = "trim"
+# Preserve complete dialogue by default. "trim" is lossy: it removes middle
+# sentences, which can contain facts, corrections and commitments.
+# "drop" discards older turns; use only after independently verifying your
+# external memory contains every fact you need. Summaries can also omit facts.
+history_window_mode = "preserve"
 
 # This app wraps action/stage-direction text in full-width parens, e.g.
 # "（轻轻拨弄吉他弦）你好。". Use a built-in preset name (see
@@ -47,15 +46,12 @@ stage_direction_pattern = "fullwidth_parens"
 
 # --- Optional: a hard ceiling on the whole prompt ------------------------
 #
-# Everything above is structural — it controls the *shape* of what gets
-# sent, never its size. If you need a guaranteed upper bound (to cap cost,
+# If you need a best-effort upper bound (to cap cost,
 # or to stay clear of a context limit), set one here and the oldest turns
 # are dropped until the estimate fits.
 #
-# Worth setting if your users send short lines with no sentence-ending
-# punctuation ("ok", "在吗"): the extractive trim above needs at least two
-# sentences to work with, so on that kind of traffic it does almost
-# nothing and only a budget will bring the size down.
+# This is a lossy opt-in even in preserve mode: dropping old turns can delete
+# facts. Leave it unset when complete history is required.
 #
 # The cache-stable prefix is never dropped to meet this, and neither are
 # the most recent budget_min_recent_turns turns — a budget too small for

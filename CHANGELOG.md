@@ -8,6 +8,21 @@ semver's own carve-out for `0.x`); patch releases are always safe to pull.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-21
+
+### Changed
+
+- Default history mode is now `preserve`: older dialogue and unique memory blocks
+  are no longer truncated to first/last sentences. Explicit trim/drop/summarize,
+  action stripping and token budgets remain lossy opt-ins, with startup warnings.
+- Failed, invalid or empty summaries retain their original input instead of falling
+  back to lossy trimming or deleting the selected history. Callbacks receive a deep
+  copy, so mutation followed by failure cannot destroy the original input.
+- Anthropic tool-result trimming now requires `anthropic_trim_tool_results=true`;
+  merely enabling the route retains old tool results. The universal launcher and
+  example configuration use preserving defaults. Existing configs, published
+  binaries and pet-specific installers are not migrated by this source change.
+
 ### Added
 
 - Native Anthropic Messages API support: `POST /v1/messages`, parallel to

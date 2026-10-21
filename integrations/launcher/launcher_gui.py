@@ -137,7 +137,7 @@ enable_whitespace_normalize = true
 enable_dedupe_verbatim_tail = true
 enable_history_window = true
 enable_strip_stage_directions = false
-history_window_mode = "trim"
+history_window_mode = "preserve"
 
 [stats]
 persist = true

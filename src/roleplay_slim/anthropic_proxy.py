@@ -22,9 +22,12 @@ share of total size) but trimming old `tool_result` content (67-85% on
 in an old turn costs the same on every request as the day it was produced,
 long after its detail has stopped mattering. So this module intentionally
 ships **only** that lever for now (the Anthropic equivalent of
-`history_window`'s trim mode) rather than porting every OpenAI strategy —
+`history_window`'s trim mode), now only when explicitly enabled, rather than porting every OpenAI strategy —
 see the design doc's "验证" section for why that scope cut is deliberate,
 not a shortcut.
+
+Default calls preserve all messages. The historical size reductions above
+do not apply unless the operator opts into lossy tool-result trimming.
 
 Anthropic tool callbacks also use `role="user"`, so this module keeps its own
 small turn splitter: tool-result-only messages stay with the human request
@@ -172,12 +175,16 @@ def trim_old_tool_results(messages: list[dict], keep_recent_turns: int) -> list[
     return out
 
 
-def compress_anthropic_messages(messages: list[dict], keep_recent_turns: int) -> list[dict]:
+def compress_anthropic_messages(
+    messages: list[dict], keep_recent_turns: int, *, trim_tool_results: bool = False
+) -> list[dict]:
     """Entry point mirroring `compressor.compress`'s role, scoped to the one
     strategy this module currently ships. `system` is not a parameter here
     on purpose — callers must not pass it through this function, since it
     is never part of `messages` in the Anthropic shape and must be
     forwarded upstream untouched regardless of what this does."""
+    if not trim_tool_results:
+        return list(messages)
     return trim_old_tool_results(messages, keep_recent_turns)
 
 

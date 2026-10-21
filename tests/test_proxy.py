@@ -1273,7 +1273,7 @@ def test_anthropic_route_trims_old_tool_result_before_forwarding():
     # keep_recent_turns=1 via anthropic_keep_recent_turns default (6) would
     # keep this short 2-turn conversation entirely — force it down to 1 to
     # actually exercise trimming in this small fixture.
-    client = _make_anthropic_client(handler, anthropic_keep_recent_turns=1)
+    client = _make_anthropic_client(handler, anthropic_keep_recent_turns=1, anthropic_trim_tool_results=True)
     client.post("/v1/messages", json=_anthropic_body())
 
     forwarded_messages = captured["body"]["messages"]
